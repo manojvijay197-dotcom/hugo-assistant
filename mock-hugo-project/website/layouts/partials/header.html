@@ -1,0 +1,1 @@
+{{ with .Scratch }}{{ end }}<a href="{{ .URL }}">Home</a>{{ range .Site.Pages }}<a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ end }}

@@ -1,0 +1,3 @@
+baseURL: "http://example.org/"
+title: "Mock Hugo Project"
+languageCode: "en-us"

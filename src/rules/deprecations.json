@@ -1,0 +1,112 @@
+[
+  {
+    "id": "scratch",
+    "feature": ".Scratch",
+    "category": "template",
+    "deprecatedIn": "0.138.0",
+    "removedIn": "",
+    "replacement": ".Store",
+    "description": "Use the built-in .Store instead of .Scratch to store temp state on page/scratch context.",
+    "documentation": "https://gohugo.io/methods/page/store/",
+    "severity": "error"
+  },
+  {
+    "id": "page-url",
+    "feature": ".URL",
+    "category": "template",
+    "deprecatedIn": "0.55.0",
+    "removedIn": "0.120.0",
+    "replacement": ".Permalink or .RelPermalink",
+    "description": "The .URL page variable is deprecated. Use .Permalink or .RelPermalink for getting page urls.",
+    "documentation": "https://gohugo.io/methods/page/permalink/",
+    "severity": "error"
+  },
+  {
+    "id": "site-menus",
+    "feature": ".Site.Menus",
+    "category": "template",
+    "deprecatedIn": "0.53.0",
+    "removedIn": "",
+    "replacement": "site.Menus",
+    "description": "Upper-cased .Site calls are deprecated in favor of the global 'site' function.",
+    "documentation": "https://gohugo.io/functions/global/site/",
+    "severity": "error"
+  },
+  {
+    "id": "site-pages",
+    "feature": ".Site.Pages",
+    "category": "template",
+    "deprecatedIn": "0.53.0",
+    "removedIn": "",
+    "replacement": "site.Pages",
+    "description": "Upper-cased .Site calls are deprecated in favor of the global 'site' function.",
+    "documentation": "https://gohugo.io/functions/global/site/",
+    "severity": "error"
+  },
+  {
+    "id": "site-params",
+    "feature": ".Site.Params",
+    "category": "template",
+    "deprecatedIn": "0.53.0",
+    "removedIn": "",
+    "replacement": "site.Params",
+    "description": "Upper-cased .Site calls are deprecated in favor of the global 'site' function.",
+    "documentation": "https://gohugo.io/functions/global/site/",
+    "severity": "error"
+  },
+  {
+    "id": "rss-link",
+    "feature": ".RSSLink",
+    "category": "template",
+    "deprecatedIn": "0.55.0",
+    "removedIn": "0.120.0",
+    "replacement": ".AlternativeOutputFormats.Get \"rss\"",
+    "description": "Use the Output Formats API to resolve the RSS Feed instead of RSSLink.",
+    "documentation": "https://gohugo.io/templates/rss/",
+    "severity": "error"
+  },
+  {
+    "id": "page-isdraft",
+    "feature": ".IsDraft",
+    "category": "template",
+    "deprecatedIn": "0.55.0",
+    "removedIn": "0.115.0",
+    "replacement": ".Draft",
+    "description": "Use .Draft page variable instead of .IsDraft.",
+    "documentation": "https://gohugo.io/methods/page/draft/",
+    "severity": "error"
+  },
+  {
+    "id": "blackfriday",
+    "feature": "blackfriday",
+    "category": "configuration",
+    "deprecatedIn": "0.60.0",
+    "removedIn": "0.100.0",
+    "replacement": "markup.goldmark",
+    "description": "The Blackfriday markdown renderer was removed in favor of Goldmark.",
+    "documentation": "https://gohugo.io/getting-started/configuration-markup/",
+    "severity": "error"
+  },
+  {
+    "id": "ugly-urls-config",
+    "feature": "uglyURLs",
+    "category": "configuration",
+    "deprecatedIn": "0.120.0",
+    "removedIn": "",
+    "replacement": "uglyurls",
+    "description": "The 'uglyURLs' configuration key should be lowercase: 'uglyurls'.",
+    "documentation": "https://gohugo.io/getting-started/configuration/",
+    "severity": "error"
+  },
+  {
+    "id": "disable-path-to-lower",
+    "feature": "disablePathToLower",
+    "category": "configuration",
+    "deprecatedIn": "0.120.0",
+    "removedIn": "0.125.0",
+    "replacement": "disablepathtolower",
+    "description": "The 'disablePathToLower' configuration key was deprecated and replaced by 'disablepathtolower'.",
+    "documentation": "https://gohugo.io/getting-started/configuration/",
+    "severity": "error"
+  }
+]

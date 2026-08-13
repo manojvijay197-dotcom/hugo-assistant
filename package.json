@@ -1,0 +1,21 @@
+{
+  "name": "hugo-assistant",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Private browser-based Hugo upgrade assistant — deprecations and broken images",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "start": "vite",
+    "smoke": "npx --yes tsx scripts/smoke-scan.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vite": "^5.4.0"
+  }
+}

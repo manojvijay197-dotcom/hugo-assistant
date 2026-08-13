@@ -1,6 +1,6 @@
-# Hugo Assistant (private)
+# Hugo Assistant
 
-Browser-only Hugo upgrade checker for **your** project. Not published to npm.
+Browser-only Hugo upgrade checker. Clone and run on any device.
 
 Scans for:
 
@@ -9,21 +9,22 @@ Scans for:
 
 No CLI. No SEO / accessibility / performance / link audits.
 
+**Repo:** https://github.com/manojvijay197-dotcom/hugo-assistant
+
 ---
 
-## How to run
+## How to run (any device)
 
-See **[STEPS.md](./STEPS.md)** for the full run guide.
-
-Short version:
+See **[STEPS.md](./STEPS.md)** for the full guide.
 
 ```bash
-cd "/Users/manoj-24261/Documents/npm hugo assistant package"
+git clone https://github.com/manojvijay197-dotcom/hugo-assistant.git
+cd hugo-assistant
 npm install
 npm run dev
 ```
 
-Then open **http://localhost:5173/** and follow the UI.
+Open **http://localhost:5173/** (or the port Vite prints) and follow the UI.
 
 ---
 
@@ -78,5 +79,6 @@ Use **Save .hugo-assistant reports** in the UI, or download PDF / Sheet / JSON f
 
 ## Notes
 
-- Analysis runs **entirely in the browser** on the folder you select. Nothing is published as a public package (`"private": true`).
+- Analysis runs **entirely in the browser** on the folder you select (`"private": true` — not published as an npm package).
 - Prefer **Chrome/Edge** so folder access uses the File System Access API (avoids Chrome’s “Upload N files to this site?” dialog from the old file-input method).
+- Node.js **18+** required.

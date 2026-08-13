@@ -1,9 +1,18 @@
 # How to run Hugo Assistant
 
-## 1. Open the project folder
+Works on any device after cloning from GitHub.
+
+## 1. Clone the repository
 
 ```bash
-cd "/Users/manoj-24261/Documents/npm hugo assistant package"
+git clone https://github.com/manojvijay197-dotcom/hugo-assistant.git
+cd hugo-assistant
+```
+
+If you already have the folder:
+
+```bash
+cd hugo-assistant
 ```
 
 ## 2. Install dependencies (first time only)
@@ -11,6 +20,8 @@ cd "/Users/manoj-24261/Documents/npm hugo assistant package"
 ```bash
 npm install
 ```
+
+Requires **Node.js 18+**.
 
 ## 3. Start the tool
 
@@ -42,6 +53,8 @@ When asked for a folder, select:
 ```text
 mock-hugo-project
 ```
+
+(inside this cloned repo)
 
 ## Stop the tool
 

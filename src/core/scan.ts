@@ -1,13 +1,25 @@
-import type { Issue, ProjectFiles, ScanReport } from '../types';
-import { listVendorModules, scanDeprecations } from './scanDeprecations';
-import { scanImages } from './scanImages';
+import type { Issue, ProjectFiles, ScanReport, ScanSection } from '../types';
+import { resultTitleFor, scanDeprecations, splitIssues } from './scanDeprecations';
 
 function summarize(issues: Issue[]) {
+  const { commonIssues, structureIssues } = splitIssues(issues);
   return {
     total: issues.length,
     errors: issues.filter((i) => i.severity === 'error').length,
     warnings: issues.filter((i) => i.severity === 'warning').length,
-    infos: issues.filter((i) => i.severity === 'info').length
+    infos: issues.filter((i) => i.severity === 'info').length,
+    common: commonIssues.length,
+    structure: structureIssues.length
+  };
+}
+
+function toSection(title: string, issues: Issue[]): ScanSection {
+  const { commonIssues, structureIssues } = splitIssues(issues);
+  return {
+    title,
+    issues,
+    commonIssues,
+    structureIssues
   };
 }
 
@@ -16,33 +28,14 @@ export function runFullScan(
   currentVersion: string,
   targetVersion: string
 ): ScanReport {
-  const websiteIssues: Issue[] = [
-    ...scanDeprecations(project, targetVersion, 'website'),
-    ...scanImages(project, 'website')
-  ];
-
-  const vendorIssues: Issue[] = [];
-  for (const mod of listVendorModules(project)) {
-    vendorIssues.push(
-      ...scanDeprecations(project, targetVersion, 'vendor', mod.name, mod.prefix),
-      ...scanImages(project, 'vendor', mod.name, mod.prefix)
-    );
-  }
-
-  const all = [...websiteIssues, ...vendorIssues];
+  const issues = scanDeprecations(project, targetVersion);
 
   return {
     generatedAt: new Date().toISOString(),
+    mode: project.kind,
     currentVersion,
     targetVersion,
-    website: {
-      title: 'Website Result',
-      issues: websiteIssues
-    },
-    vendor: {
-      title: 'Vendor Result',
-      issues: vendorIssues
-    },
-    summary: summarize(all)
+    results: toSection(resultTitleFor(project.kind), issues),
+    summary: summarize(issues)
   };
 }

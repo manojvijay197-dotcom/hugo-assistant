@@ -78,6 +78,11 @@ export function getTargetVersionOptions(currentVersion: string): string[] {
   return [...new Set(options)];
 }
 
+/** All known Hugo releases — used when scanning Hugo modules (no trago.js / current version). */
+export function getAllTargetVersionOptions(): string[] {
+  return [...HUGO_RELEASES];
+}
+
 function coerceOk(v: string): boolean {
   return /^\d+\.\d+(\.\d+)?$/.test(v.replace(/^v/i, ''));
 }

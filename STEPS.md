@@ -37,24 +37,25 @@ Go to the URL shown in the terminal (usually):
 
 ## 5. Use the tool
 
-1. Click **Select folder**
-2. Confirm in the popup
-3. Choose the project root that contains `website/` (and `website/trago.js`)
-4. Check the detected Hugo version
-5. Select a **target version**
-6. Click **Run checks**
-7. Review **Website Result** and **Vendor Result**
-8. Download **PDF**, **Sheet**, **JSON**, or save `.hugo-assistant` reports
+1. Choose **Regular Repo** or **Hugo modules (vendor)** (required before folder select)
+2. Click **Select folder**
+3. Confirm in the popup
+4. Upload the matching folder type:
+   - **Regular Repo** → root that contains `website/` + `website/trago.js`
+   - **Hugo modules** → module/theme folder **without** `trago.js` (layouts, content, config, assets, data, i18n)
+5. For Regular Repo: check detected Hugo version, then pick a **target version**
+6. For Hugo modules: pick the **target Hugo version** only (no trago.js)
+7. Click **Run checks**
+8. Review structure vs other changes
+9. Download **PDF**, **Sheet**, **JSON**, or save `.hugo-assistant` reports
+
+Mismatch uploads are rejected (e.g. modules mode + folder with `trago.js`).
 
 ### Quick test with mock project
 
-When asked for a folder, select:
+**Regular Repo:** select `mock-hugo-project`
 
-```text
-mock-hugo-project
-```
-
-(inside this cloned repo)
+**Hugo modules:** select `mock-hugo-project/website/themes/demo-theme`
 
 ## Stop the tool
 

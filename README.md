@@ -1,13 +1,20 @@
 # Hugo Assistant
 
-Browser-only Hugo upgrade checker. Clone and run on any device.
+Browser-only Hugo migration checker. Clone and run on any device.
+
+Choose one mode per upload:
+
+- **Regular Repo** — project with `website/trago.js` (current version detected)
+- **Hugo modules (vendor)** — module/theme folder without `trago.js` (you pick target version)
+
+Each upload is scanned separately (not in parallel). Regular mode does **not** walk `_vendor/` or `themes/`.
 
 Scans for:
 
-- **Hugo deprecations** (reported as errors, with fix + official docs link)
-- **Broken images** (checks against `static/` and `assets/`)
+- **Hugo code deprecations** (with fix + official docs link)
+- **Hugo structure changes** (e.g. `layouts/partials` → `layouts/_partials`)
 
-No CLI. No SEO / accessibility / performance / link audits.
+No CLI. No image / SEO / accessibility / performance / link audits.
 
 **Repo:** https://github.com/manojvijay197-dotcom/hugo-assistant
 
@@ -30,6 +37,8 @@ Open **http://localhost:5173/** (or the port Vite prints) and follow the UI.
 
 ## Project layout expected
 
+### Regular Repo
+
 ```text
 your-repo/
 └── website/
@@ -40,10 +49,22 @@ your-repo/
     ├── data/
     ├── i18n/
     ├── assets/
-    ├── static/
-    └── _vendor/          ← optional Hugo modules
-        └── …/layouts|assets|static|data|i18n
+    └── static/
 ```
+
+### Hugo modules (vendor)
+
+```text
+my-module/
+├── layouts/
+├── content/              ← optional
+├── config.yaml           ← or hugo.toml, optional
+├── assets/
+├── data/
+└── i18n/
+```
+
+No `trago.js` in module uploads.
 
 ### `trago.js` example
 

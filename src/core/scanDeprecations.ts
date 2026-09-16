@@ -1,106 +1,97 @@
-import type { Issue, ProjectFiles } from '../types';
+import type { Issue, ProjectFiles, ProjectKind } from '../types';
 import { DeprecationEngine } from './DeprecationEngine';
-import {
-  listUnder,
-  toWebsiteRelative,
-  websitePath,
-  join
-} from './project';
+import { listUnder, toWebsiteRelative, websitePath } from './project';
 
 const TEXT_EXTS = /\.(html?|md|markdown|ya?ml|toml|json|js|css|scss|svg|xml|txt)$/i;
 
-function isScanTarget(relFromWebsite: string, area: 'website' | 'vendor'): boolean {
-  const p = relFromWebsite.replace(/\\/g, '/');
-
-  if (area === 'website') {
-    return (
-      p.startsWith('content/') ||
-      p.startsWith('layouts/') ||
-      p.startsWith('layout/') ||
-      p.startsWith('data/') ||
-      p.startsWith('i18n/') ||
-      p.startsWith('assets/') ||
-      p.startsWith('static/') ||
-      /^config\.(ya?ml|yml|toml)$/i.test(p) ||
-      /^hugo\.(ya?ml|yml|toml)$/i.test(p)
-    );
-  }
-
-  // vendor module relative: layouts|assets|static|data|i18n
+/** Same targets for Regular Repo and Hugo modules. */
+function isScanTarget(relFromRoot: string): boolean {
+  const p = relFromRoot.replace(/\\/g, '/').replace(/^\.\//, '');
   return (
+    p.startsWith('content/') ||
+    p === 'content' ||
     p.startsWith('layouts/') ||
+    p === 'layouts' ||
     p.startsWith('layout/') ||
-    p.startsWith('assets/') ||
-    p.startsWith('static/') ||
     p.startsWith('data/') ||
-    p.startsWith('i18n/')
+    p === 'data' ||
+    p.startsWith('i18n/') ||
+    p === 'i18n' ||
+    p.startsWith('assets/') ||
+    p === 'assets' ||
+    p.startsWith('static/') ||
+    p === 'static' ||
+    /^config\.(ya?ml|yml|toml)$/i.test(p) ||
+    /^hugo\.(ya?ml|yml|toml)$/i.test(p)
   );
 }
 
-export function scanDeprecations(
-  project: ProjectFiles,
-  targetVersion: string,
-  scope: 'website' | 'vendor',
-  vendorModule?: string,
-  modulePrefix?: string
-): Issue[] {
+function isStructureCandidate(rel: string): boolean {
+  const p = rel.replace(/\\/g, '/').replace(/^\.\//, '');
+  return (
+    p.startsWith('layouts/') ||
+    p.startsWith('layout/') ||
+    p.startsWith('content/') ||
+    /\.(html?|md|markdown|svg)$/i.test(p)
+  );
+}
+
+/**
+ * Scan one uploaded project (regular website OR Hugo module).
+ * Same folder set for both modes: content, layouts, data, i18n, assets, static, config/hugo.
+ * Regular mode never walks _vendor/ or themes/ — those are uploaded separately.
+ */
+export function scanDeprecations(project: ProjectFiles, targetVersion: string): Issue[] {
   const engine = new DeprecationEngine();
   const active = engine.evaluate(targetVersion);
   const issues: Issue[] = [];
+  const scope: Issue['scope'] = project.kind === 'module' ? 'module' : 'website';
 
-  if (scope === 'website') {
-    const rootPrefix = websitePath(project);
-    const files = listUnder(project, rootPrefix);
-    for (const file of files) {
-      const rel = toWebsiteRelative(project, file.path);
-      if (rel.startsWith('_vendor/')) continue;
-      if (!isScanTarget(rel, 'website')) continue;
-      if (!TEXT_EXTS.test(rel) && !/^config\./i.test(rel) && !/^hugo\./i.test(rel)) continue;
-      if (!file.content) continue;
-      issues.push(...engine.scanContent(rel, file.content, active, 'website'));
-    }
-    return issues;
-  }
+  const rootPrefix = websitePath(project);
+  const files = listUnder(project, rootPrefix);
 
-  // vendor
-  const prefix = modulePrefix || '';
-  const files = listUnder(project, prefix);
   for (const file of files) {
-    const relInsideModule = file.path.slice(prefix.length).replace(/^\//, '');
-    if (!isScanTarget(relInsideModule, 'vendor')) continue;
-    if (!TEXT_EXTS.test(relInsideModule)) continue;
+    let rel = toWebsiteRelative(project, file.path).replace(/\\/g, '/');
+    if (rel.startsWith('./')) rel = rel.slice(2);
+
+    // Regular repos: ignore nested vendor/theme trees (checked via Hugo modules mode).
+    if (project.kind === 'regular') {
+      if (rel.startsWith('_vendor/') || rel.startsWith('themes/')) continue;
+    }
+
+    if (!isScanTarget(rel)) continue;
+
+    if (isStructureCandidate(rel)) {
+      issues.push(...engine.scanStructure(rel, file.content || undefined, active, scope));
+    }
+
+    if (
+      !TEXT_EXTS.test(rel) &&
+      !/^config\./i.test(rel) &&
+      !/^hugo\./i.test(rel)
+    ) {
+      continue;
+    }
     if (!file.content) continue;
-    const display = toWebsiteRelative(project, file.path);
-    issues.push(
-      ...engine.scanContent(display, file.content, active, 'vendor', vendorModule)
-    );
+    issues.push(...engine.scanContent(rel, file.content, active, scope));
   }
+
   return issues;
 }
 
-export function listVendorModules(project: ProjectFiles): Array<{ name: string; prefix: string }> {
-  const vendorRoot = websitePath(project, '_vendor');
-  const modules = new Map<string, string>();
+export function splitIssues(issues: Issue[]): {
+  commonIssues: Issue[];
+  structureIssues: Issue[];
+} {
+  const structureIssues = issues.filter(
+    (i) => i.structureChange || i.category === 'structure'
+  );
+  const commonIssues = issues.filter(
+    (i) => !i.structureChange && i.category !== 'structure'
+  );
+  return { commonIssues, structureIssues };
+}
 
-  for (const path of project.files.keys()) {
-    if (!path.startsWith(vendorRoot + '/') && path !== vendorRoot) continue;
-    const rest = path.slice(vendorRoot.length + 1);
-    if (!rest) continue;
-    // _vendor/github.com/org/repo/...  → module key = first 3 segments when github-style,
-    // otherwise first segment.
-    const parts = rest.split('/');
-    let name: string;
-    let prefix: string;
-    if (parts[0].includes('.')) {
-      // host/owner/repo
-      name = parts.slice(0, Math.min(3, parts.length)).join('/');
-      prefix = join(vendorRoot, name);
-    } else {
-      name = parts[0];
-      prefix = join(vendorRoot, name);
-    }
-    modules.set(name, prefix);
-  }
-
-  return [...modules.entries()].map(([name, prefix]) => ({ name, prefix }));
+export function resultTitleFor(kind: ProjectKind): string {
+  return kind === 'module' ? 'Hugo Module Result' : 'Website Result';
 }

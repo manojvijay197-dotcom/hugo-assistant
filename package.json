@@ -2,7 +2,7 @@
   "name": "hugo-assistant",
   "version": "2.0.0",
   "private": true,
-  "description": "Private browser-based Hugo upgrade assistant — deprecations and broken images",
+  "description": "Private browser-based Hugo migration assistant — deprecations and structure changes",
   "type": "module",
   "scripts": {
     "dev": "vite",

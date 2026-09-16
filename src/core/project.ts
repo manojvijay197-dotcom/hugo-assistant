@@ -1,4 +1,4 @@
-import type { ProjectFiles, VirtualFile } from '../types';
+import type { ProjectFiles, ProjectKind, VirtualFile } from '../types';
 import { parseHugoVersionFromTrago } from './versions';
 
 function toPosix(p: string): string {
@@ -27,6 +27,25 @@ const SKIP_DIRS = new Set([
   'dist',
   'coverage'
 ]);
+
+function isTragoPath(rel: string): boolean {
+  const p = toPosix(rel);
+  return p === 'trago.js' || /(^|\/)trago\.js$/i.test(p);
+}
+
+function modeMismatchError(kind: ProjectKind, tragoPresent: boolean): Error | null {
+  if (kind === 'module' && tragoPresent) {
+    return new Error(
+      'Hugo modules (vendor) selected, but trago.js was found. This is a Regular Repo. Switch to “Regular Repo” or upload a module folder without trago.js.'
+    );
+  }
+  if (kind === 'regular' && !tragoPresent) {
+    return new Error(
+      'Regular Repo selected, but no trago.js was found. This looks like a Hugo module. Switch to “Hugo modules (vendor)” or upload a project with website/trago.js.'
+    );
+  }
+  return null;
+}
 
 function shouldReadText(rel: string, size: number): boolean {
   if (
@@ -58,35 +77,138 @@ async function ingestFile(
   files.set(rel, { path: rel, content, size: file.size });
 }
 
-/**
- * Build a virtual file map from a browser FileList (webkitdirectory upload).
- * Prefer loadProjectFromDirectoryHandle — it avoids Chrome's bulk "Upload N files?" alert.
- */
-export async function loadProjectFromFileList(fileList: FileList): Promise<ProjectFiles> {
-  const files = new Map<string, VirtualFile>();
-
-  const entries = Array.from(fileList);
-  await Promise.all(entries.map(async (file) => {
-    const rel = toPosix(
-      (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-    );
-    await ingestFile(files, rel, file);
-  }));
-
-  return finalizeProject(files);
-}
-
 type DirHandle = FileSystemDirectoryHandle & {
   entries: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+  getDirectoryHandle(name: string): Promise<FileSystemDirectoryHandle>;
+  getFileHandle(name: string): Promise<FileSystemFileHandle>;
 };
 
+/** Instant checks for the usual Regular Repo layout — no file reads. */
+async function probeCommonTragoPaths(root: FileSystemDirectoryHandle): Promise<string | null> {
+  const dir = root as DirHandle;
+
+  try {
+    const website = await dir.getDirectoryHandle('website');
+    await (website as DirHandle).getFileHandle('trago.js');
+    return 'website/trago.js';
+  } catch {
+    /* not present */
+  }
+
+  try {
+    await dir.getFileHandle('trago.js');
+    return 'trago.js';
+  } catch {
+    /* not present */
+  }
+
+  return null;
+}
+
 /**
- * Read a folder via the File System Access API (no Chrome "Upload N files?" trust dialog).
+ * Name-only walk looking for trago.js. Stops at first hit.
+ * Does not read file contents.
  */
+async function findTragoPathByName(
+  root: FileSystemDirectoryHandle,
+  onProgress?: (msg: string) => void
+): Promise<string | null> {
+  const queue: Array<{ dir: FileSystemDirectoryHandle; prefix: string }> = [
+    { dir: root, prefix: '' }
+  ];
+  let seen = 0;
+
+  while (queue.length) {
+    const { dir, prefix } = queue.shift()!;
+    const iterable = dir as DirHandle;
+
+    for await (const [name, handle] of iterable.entries()) {
+      if (SKIP_DIRS.has(name)) continue;
+      const rel = prefix ? `${prefix}/${name}` : name;
+      seen += 1;
+      if (seen % 400 === 0) onProgress?.(`Checking folder type… ${seen} entries`);
+
+      if (handle.kind === 'directory') {
+        queue.push({ dir: handle as FileSystemDirectoryHandle, prefix: rel });
+        continue;
+      }
+
+      if (handle.kind === 'file' && /^trago\.js$/i.test(name)) {
+        return toPosix(rel);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function assertKindMatchesDirectory(
+  root: FileSystemDirectoryHandle,
+  kind: ProjectKind,
+  onProgress?: (msg: string) => void
+): Promise<void> {
+  onProgress?.('Checking folder type…');
+
+  const quick = await probeCommonTragoPaths(root);
+  if (quick) {
+    const err = modeMismatchError(kind, true);
+    if (err) throw err;
+    return; // regular + trago found at common path — good
+  }
+
+  // No common-path trago.js. For module mode that's usually enough (fast path).
+  // For regular mode we must confirm it isn't elsewhere; for module we still
+  // do a cheap name-only scan so nested trago.js can't sneak through.
+  if (kind === 'module') {
+    onProgress?.('Confirming no trago.js…');
+    const nested = await findTragoPathByName(root, onProgress);
+    const err = modeMismatchError(kind, Boolean(nested));
+    if (err) throw err;
+    return;
+  }
+
+  onProgress?.('Looking for trago.js…');
+  const nested = await findTragoPathByName(root, onProgress);
+  const err = modeMismatchError(kind, Boolean(nested));
+  if (err) throw err;
+}
+
+function assertKindMatchesPaths(paths: string[], kind: ProjectKind): void {
+  const tragoPresent = paths.some(isTragoPath);
+  const err = modeMismatchError(kind, tragoPresent);
+  if (err) throw err;
+}
+
+export async function loadProjectFromFileList(
+  fileList: FileList,
+  kind: ProjectKind
+): Promise<ProjectFiles> {
+  const entries = Array.from(fileList);
+  const paths = entries.map((file) =>
+    toPosix((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name)
+  );
+
+  // Fail before reading any file contents
+  assertKindMatchesPaths(paths, kind);
+
+  const files = new Map<string, VirtualFile>();
+  await Promise.all(
+    entries.map(async (file, i) => {
+      await ingestFile(files, paths[i], file);
+    })
+  );
+
+  return finalizeProject(files, kind);
+}
+
 export async function loadProjectFromDirectoryHandle(
   root: FileSystemDirectoryHandle,
+  kind: ProjectKind,
   onProgress?: (scanned: number, current: string) => void
 ): Promise<ProjectFiles> {
+  // Validate mode before reading file contents
+  await assertKindMatchesDirectory(root, kind, (msg) => onProgress?.(0, msg));
+
   const files = new Map<string, VirtualFile>();
   let scanned = 0;
 
@@ -104,6 +226,11 @@ export async function loadProjectFromDirectoryHandle(
 
       if (handle.kind !== 'file') continue;
 
+      // Safety: if module mode somehow still hits trago.js mid-walk, abort
+      if (kind === 'module' && /^trago\.js$/i.test(name)) {
+        throw modeMismatchError(kind, true)!;
+      }
+
       const fileHandle = handle as FileSystemFileHandle;
       const file = await fileHandle.getFile();
       await ingestFile(files, toPosix(rel), file);
@@ -114,17 +241,36 @@ export async function loadProjectFromDirectoryHandle(
 
   await walk(root, '');
   onProgress?.(scanned, 'done');
-  return finalizeProject(files);
+  return finalizeProject(files, kind);
 }
 
-function finalizeProject(files: Map<string, VirtualFile>): ProjectFiles {
-  const websiteRoot = detectWebsiteRoot(files);
+export function hasTragoJs(files: Map<string, VirtualFile>): boolean {
+  return [...files.keys()].some(isTragoPath);
+}
+
+function finalizeProject(files: Map<string, VirtualFile>, kind: ProjectKind): ProjectFiles {
+  const tragoPresent = hasTragoJs(files);
+  const mismatch = modeMismatchError(kind, tragoPresent);
+  if (mismatch) throw mismatch;
+
+  if (kind === 'regular') {
+    const websiteRoot = detectWebsiteRoot(files);
+    if (!websiteRoot) {
+      throw new Error(
+        'Could not find a website/ folder with trago.js in the selected project.'
+      );
+    }
+    return { files, websiteRoot, kind };
+  }
+
+  const websiteRoot = detectModuleRoot(files);
   if (!websiteRoot) {
     throw new Error(
-      'Could not find a website/ folder with trago.js in the selected project.'
+      'Could not find Hugo module folders. Upload a module root that contains layouts/, content/, config/hugo files, assets/, data/, and/or i18n/.'
     );
   }
-  return { files, websiteRoot };
+
+  return { files, websiteRoot, kind };
 }
 
 export function detectWebsiteRoot(files: Map<string, VirtualFile>): string | null {
@@ -137,6 +283,38 @@ export function detectWebsiteRoot(files: Map<string, VirtualFile>): string | nul
 
   tragoPaths.sort((a, b) => a.split('/').length - b.split('/').length);
   return dirname(tragoPaths[0]);
+}
+
+/** Shallowest folder that looks like a Hugo module/theme package. */
+export function detectModuleRoot(files: Map<string, VirtualFile>): string | null {
+  const roots = new Set<string>();
+
+  for (const path of files.keys()) {
+    const p = toPosix(path);
+    const lower = p.toLowerCase();
+
+    const folderMatch = lower.match(
+      /(?:^|\/)(layouts|content|assets|data|i18n|static)(?:\/|$)/
+    );
+    if (folderMatch && folderMatch.index != null) {
+      const before = p.slice(0, folderMatch.index);
+      roots.add(before.replace(/\/$/, '') || '.');
+      continue;
+    }
+
+    if (/(^|\/)(config|hugo)\.(ya?ml|yml|toml)$/i.test(p)) {
+      const dir = dirname(p);
+      roots.add(dir || '.');
+    }
+  }
+
+  if (roots.size === 0) return null;
+
+  return [...roots].sort((a, b) => {
+    const da = a === '.' ? 0 : a.split('/').length;
+    const db = b === '.' ? 0 : b.split('/').length;
+    return da - db || a.localeCompare(b);
+  })[0];
 }
 
 export function readTragoVersion(project: ProjectFiles): string {
@@ -168,6 +346,11 @@ export function readTragoVersion(project: ProjectFiles): string {
 
 export function listUnder(project: ProjectFiles, prefix: string): VirtualFile[] {
   const norm = toPosix(prefix).replace(/\/$/, '');
+  // Empty / "." means the project scan root itself — include every file.
+  if (!norm || norm === '.') {
+    return [...project.files.values()];
+  }
+
   const out: VirtualFile[] = [];
   for (const [path, file] of project.files) {
     if (path === norm || path.startsWith(norm + '/')) out.push(file);
@@ -176,10 +359,13 @@ export function listUnder(project: ProjectFiles, prefix: string): VirtualFile[] 
 }
 
 export function websitePath(project: ProjectFiles, ...segments: string[]): string {
-  if (project.websiteRoot === '.' || project.websiteRoot === '') {
-    return join(...segments);
-  }
-  return join(project.websiteRoot, ...segments);
+  const root =
+    project.websiteRoot === '.' || project.websiteRoot === ''
+      ? ''
+      : project.websiteRoot;
+  if (!segments.length) return root || '.';
+  if (!root) return join(...segments);
+  return join(root, ...segments);
 }
 
 export function fileExists(project: ProjectFiles, relativeFromWebsite: string): boolean {

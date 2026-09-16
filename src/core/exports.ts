@@ -18,7 +18,7 @@ export function downloadSheet(report: ScanReport): void {
   const rows: string[][] = [
     [
       'Scope',
-      'Vendor Module',
+      'Issue Group',
       'Severity',
       'Category',
       'Title',
@@ -32,10 +32,14 @@ export function downloadSheet(report: ScanReport): void {
     ]
   ];
 
-  const push = (issue: Issue, scopeTitle: string) => {
+  const push = (issue: Issue) => {
+    const group =
+      issue.structureChange || issue.category === 'structure'
+        ? 'Structure related'
+        : 'Other changes';
     rows.push([
-      scopeTitle,
-      issue.vendorModule || '',
+      report.results.title,
+      group,
       issue.severity,
       issue.category,
       issue.title,
@@ -49,8 +53,8 @@ export function downloadSheet(report: ScanReport): void {
     ]);
   };
 
-  for (const issue of report.website.issues) push(issue, 'Website Result');
-  for (const issue of report.vendor.issues) push(issue, 'Vendor Result');
+  for (const issue of report.results.structureIssues) push(issue);
+  for (const issue of report.results.commonIssues) push(issue);
 
   const csv = rows
     .map((r) =>
@@ -68,28 +72,11 @@ export function downloadSheet(report: ScanReport): void {
 }
 
 export function buildReportHtml(report: ScanReport): string {
-  const fixCell = (i: Issue) => {
-    const fix = escapeHtml(i.replacement || '—');
-    if (!i.documentation) return fix;
-    const href = escapeHtml(i.documentation);
-    return `${fix}<div><a href="${href}" target="_blank" rel="noopener noreferrer">Official docs</a></div>`;
-  };
-
-  const issueRows = (issues: Issue[]) =>
-    issues
-      .map(
-        (i) => `<tr class="sev-${i.severity}">
-      <td><span class="badge ${i.severity}">${i.severity}</span></td>
-      <td>${escapeHtml(i.category)}</td>
-      <td>${escapeHtml(i.title)}</td>
-      <td><code>${escapeHtml(i.file || '')}${i.line ? ':' + i.line : ''}</code></td>
-      <td>${escapeHtml(i.deprecatedIn || '—')}</td>
-      <td>${fixCell(i)}</td>
-      <td>${escapeHtml(i.description)}</td>
-      <td>${escapeHtml(i.vendorModule || '—')}</td>
-    </tr>`
-      )
-      .join('\n');
+  const modeLabel = report.mode === 'module' ? 'Hugo modules (vendor)' : 'Regular Repo';
+  const versionLine =
+    report.mode === 'module'
+      ? `Target: <strong>${escapeHtml(report.targetVersion)}</strong>`
+      : `Current: <strong>${escapeHtml(report.currentVersion)}</strong> · Target: <strong>${escapeHtml(report.targetVersion)}</strong>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -133,6 +120,11 @@ export function buildReportHtml(report: ScanReport): string {
   .badge.error { background: rgba(232,93,93,.2); color: var(--error); }
   .badge.warning { background: rgba(224,160,69,.2); color: var(--warning); }
   .badge.info { background: rgba(76,143,217,.2); color: var(--info); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+  .split h3 { margin: 0 0 .5rem; font-size: 1rem; color: var(--muted); }
+  @media (max-width: 1100px), print {
+    .split { grid-template-columns: 1fr; }
+  }
   @media print {
     body { background: white; color: #111; padding: 0; }
     .card, table { background: white; border-color: #ccc; }
@@ -143,44 +135,73 @@ export function buildReportHtml(report: ScanReport): string {
 <body>
   <h1>Hugo Assistant</h1>
   <p class="meta">
-    Current: <strong>${escapeHtml(report.currentVersion)}</strong>
-    · Target: <strong>${escapeHtml(report.targetVersion)}</strong>
+    Mode: <strong>${escapeHtml(modeLabel)}</strong>
+    · ${versionLine}
     · Generated: ${escapeHtml(report.generatedAt)}
   </p>
   <div class="cards">
     <div class="card"><span>Total</span><strong>${report.summary.total}</strong></div>
+    <div class="card"><span>Other</span><strong>${report.summary.common}</strong></div>
+    <div class="card"><span>Structure</span><strong>${report.summary.structure}</strong></div>
     <div class="card"><span>Errors</span><strong>${report.summary.errors}</strong></div>
     <div class="card"><span>Warnings</span><strong>${report.summary.warnings}</strong></div>
-    <div class="card"><span>Infos</span><strong>${report.summary.infos}</strong></div>
   </div>
 
-  <h2>${escapeHtml(report.website.title)}</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Severity</th><th>Category</th><th>Title</th><th>File</th>
-        <th>Deprecated In</th><th>Fix</th><th>Description</th><th>Module</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${report.website.issues.length ? issueRows(report.website.issues) : '<tr><td colspan="8">No issues found.</td></tr>'}
-    </tbody>
-  </table>
-
-  <h2>${escapeHtml(report.vendor.title)}</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Severity</th><th>Category</th><th>Title</th><th>File</th>
-        <th>Deprecated In</th><th>Fix</th><th>Description</th><th>Module</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${report.vendor.issues.length ? issueRows(report.vendor.issues) : '<tr><td colspan="8">No issues found.</td></tr>'}
-    </tbody>
-  </table>
+  ${sectionHtml(report.results)}
 </body>
 </html>`;
+}
+
+function sectionHtml(section: ScanReport['results']): string {
+  return `
+  <h2>${escapeHtml(section.title)}</h2>
+  <div class="split">
+    <div>
+      <h3>Structure related issues (${section.structureIssues.length})</h3>
+      ${issueTable(section.structureIssues, false)}
+    </div>
+    <div>
+      <h3>Other changes (${section.commonIssues.length})</h3>
+      ${issueTable(section.commonIssues, true)}
+    </div>
+  </div>
+  `;
+}
+
+function issueTable(issues: Issue[], showCategory: boolean): string {
+  const categoryHeader = showCategory ? '<th>Category</th>' : '';
+  const colspan = showCategory ? 7 : 6;
+  return `<table>
+    <thead>
+      <tr>
+        <th>Severity</th>${categoryHeader}<th>Title</th><th>File</th>
+        <th>Deprecated In</th><th>Fix</th><th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${issues.length ? issueRows(issues, showCategory) : `<tr><td colspan="${colspan}">No issues found.</td></tr>`}
+    </tbody>
+  </table>`;
+}
+
+function issueRows(issues: Issue[], showCategory: boolean): string {
+  return issues
+    .map((i) => {
+      const categoryCell = showCategory ? `<td>${escapeHtml(i.category)}</td>` : '';
+      const fix = i.documentation
+        ? `${escapeHtml(i.replacement || '—')}<div><a href="${escapeHtml(i.documentation)}" target="_blank" rel="noopener noreferrer">Official docs</a></div>`
+        : escapeHtml(i.replacement || '—');
+      return `<tr class="sev-${i.severity}">
+      <td><span class="badge ${i.severity}">${i.severity}</span></td>
+      ${categoryCell}
+      <td>${escapeHtml(i.title)}</td>
+      <td><code>${escapeHtml(i.file || '')}${i.line ? ':' + i.line : ''}</code></td>
+      <td>${escapeHtml(i.deprecatedIn || '—')}</td>
+      <td>${fix}</td>
+      <td>${escapeHtml(i.description)}</td>
+    </tr>`;
+    })
+    .join('\n');
 }
 
 function escapeHtml(s: string): string {
@@ -215,16 +236,11 @@ export function downloadPdf(report: ScanReport): { ok: true } | { ok: false; rea
   return { ok: true };
 }
 
-/** Bundle both artifacts named for .hugo-assistant/ usage. */
 export function downloadHugoAssistantBundle(report: ScanReport): void {
   downloadJson(report);
   setTimeout(() => downloadHtmlReport(report), 200);
 }
 
-/**
- * Write `.hugo-assistant/report.html` + `report.json` into a user-picked folder
- * (Chrome/Edge File System Access API). Falls back to downloads if unavailable.
- */
 export async function saveReportsToHugoAssistantFolder(report: ScanReport): Promise<'written' | 'downloaded'> {
   const html = buildReportHtml(report);
   const json = JSON.stringify(report, null, 2);
@@ -254,7 +270,6 @@ export async function saveReportsToHugoAssistantFolder(report: ScanReport): Prom
 
     return 'written';
   } catch (err) {
-    // User cancelled or permission denied — still offer downloads
     if (err instanceof DOMException && err.name === 'AbortError') {
       return 'downloaded';
     }

@@ -207,7 +207,18 @@ function renderSummary(report: ScanReport): string {
 
 function renderResults(report: ScanReport): string {
   if (state.view === 'json') {
-    return `<pre class="json-view">${escapeHtml(JSON.stringify(report, null, 2))}</pre>`;
+    return `
+      <div class="json-panel">
+        <div class="json-panel-toolbar">
+          <button type="button" class="json-copy-btn" data-export="copy-json" ${state.busy ? 'disabled' : ''}>
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="json-view">${escapeHtml(JSON.stringify(report, null, 2))}</pre>
+      </div>`;
   }
 
   const { title, commonIssues, structureIssues } = report.results;
@@ -238,6 +249,10 @@ function renderResults(report: ScanReport): string {
   `;
 }
 
+function issueVersionLabel(issue: Issue): string {
+  return issue.sinceVersion || issue.deprecatedIn || issue.removedIn || '—';
+}
+
 function renderTable(issues: Issue[], opts: { showCategory: boolean }): string {
   if (!issues.length) {
     return `<div class="table-wrap"><table><tbody><tr><td>No issues found.</td></tr></tbody></table></div>`;
@@ -252,7 +267,7 @@ function renderTable(issues: Issue[], opts: { showCategory: boolean }): string {
       ${categoryCell}
       <td>${escapeHtml(i.title)}</td>
       <td><code>${escapeHtml(i.file || '')}${i.line ? ':' + i.line : ''}</code></td>
-      <td>${escapeHtml(i.deprecatedIn || '—')}</td>
+      <td>${escapeHtml(issueVersionLabel(i))}</td>
       <td>${renderFixCell(i)}</td>
       <td>${escapeHtml(i.description)}</td>
     </tr>`;
@@ -267,7 +282,7 @@ function renderTable(issues: Issue[], opts: { showCategory: boolean }): string {
           ${categoryHeader}
           <th>Title</th>
           <th>Where used</th>
-          <th>Deprecated in</th>
+          <th>Since version</th>
           <th>How to fix</th>
           <th>Details</th>
         </tr>
@@ -322,7 +337,17 @@ function bindEvents(): void {
       render();
       return;
     }
-    await processProject(loadProjectFromFileList(input.files, state.projectKind));
+    await processProject(
+      loadProjectFromFileList(input.files, state.projectKind, (progress) => {
+        if (progress.phase === 'check') {
+          updateLoader('Checking folder', 'Validating project type…');
+          return;
+        }
+        const percent =
+          progress.total === 0 ? 100 : Math.round((progress.done / progress.total) * 100);
+        updateLoader('Reading', undefined, percent);
+      })
+    );
     input.value = '';
   });
 
@@ -405,15 +430,14 @@ async function startFolderUpload(input: HTMLInputElement | null): Promise<void> 
     try {
       const dir = await window.showDirectoryPicker({ mode: 'read' });
       await processProject(
-        loadProjectFromDirectoryHandle(dir, state.projectKind!, (scanned, current) => {
-          if (scanned === 0) {
-            updateLoader('Checking folder type', current || 'Validating before reading files…');
+        loadProjectFromDirectoryHandle(dir, state.projectKind!, (progress) => {
+          if (progress.phase === 'check') {
+            updateLoader('Checking folder', 'Validating project type…');
             return;
           }
-          updateLoader(
-            'Reading project files',
-            `Scanned ${scanned} file(s)… ${current === 'done' ? '' : current}`
-          );
+          const percent =
+            progress.total === 0 ? 100 : Math.round((progress.done / progress.total) * 100);
+          updateLoader('Reading', undefined, percent);
         })
       );
     } catch (err) {
@@ -463,18 +487,18 @@ async function processProject(loadPromise: Promise<ProjectFiles>): Promise<void>
   state.project = null;
   state.status = 'Reading folder…';
 
-  showLoader('Reading folder', 'Loading project files from disk…');
+  showLoader('Reading', undefined, 0);
   render();
-  showLoader('Reading folder', 'Loading project files from disk…');
+  showLoader('Reading', undefined, 0);
 
   try {
     await tick(40);
-    updateLoader('Checking folder type', 'Validating Regular Repo vs Hugo modules before reading files…');
+    updateLoader('Checking folder', 'Validating project type…');
 
     const project = await loadPromise;
 
     if (project.kind === 'regular') {
-      updateLoader('Reading Hugo version', `Parsing ${project.websiteRoot}/trago.js…`);
+      updateLoader('Reading', undefined, 100);
       await tick(60);
       const currentVersion = readTragoVersion(project);
       state.project = project;
@@ -561,6 +585,20 @@ async function handleExport(kind: string): Promise<void> {
   render();
 
   try {
+    if (kind === 'copy-json') {
+      await withLoader('Copying JSON', 'Writing the full scan report to the clipboard…', async () => {
+        await tick(80);
+        await copyTextToClipboard(JSON.stringify(state.report!, null, 2));
+      });
+      state.status = 'Report JSON copied to clipboard.';
+      await showPopup(
+        'JSON copied',
+        'The full report is on your clipboard in the same formatted JSON. Paste it anywhere you need.',
+        'success'
+      );
+      return;
+    }
+
     if (kind === 'ai-prompt') {
       await withLoader(
         'Building AI prompt',
@@ -575,12 +613,7 @@ async function handleExport(kind: string): Promise<void> {
       await showPopup(
         'Prompt copied',
         'Paste it into Cursor, ChatGPT, or another coding AI with your project open. One prompt includes instructions — no extra back-and-forth needed.',
-        'success',
-        {
-          label: 'Please include report.json',
-          labelDetail:
-            'Attach the report.json file generated from this tool (Download JSON or Save .hugo-assistant reports) together with the prompt.'
-        }
+        'success'
       );
       return;
     }

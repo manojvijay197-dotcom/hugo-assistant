@@ -15,6 +15,8 @@ export interface Issue {
   documentation?: string;
   deprecatedIn?: string;
   removedIn?: string;
+  /** Exact catalog version this finding comes from (includes patch, e.g. 0.126.3). */
+  sinceVersion?: string;
   scope: 'website' | 'module';
   structureChange?: boolean;
 }
@@ -26,6 +28,8 @@ export interface DeprecationRule {
   introducedIn?: string;
   deprecatedIn: string;
   removedIn: string;
+  /** Exact release version from catalog (patch-accurate). */
+  sinceVersion: string;
   replacement: string;
   description: string;
   usageBefore?: string;
@@ -33,6 +37,11 @@ export interface DeprecationRule {
   documentation: string;
   severity: Severity;
   structureChange?: boolean;
+  /**
+   * Project-level release note that always appears when target >= sinceVersion
+   * (used for patch/sub-version behavior changes without a reliable code pattern).
+   */
+  advisory?: boolean;
 }
 
 export interface ScanSection {

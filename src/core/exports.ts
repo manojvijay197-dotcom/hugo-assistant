@@ -24,7 +24,7 @@ export function downloadSheet(report: ScanReport): void {
       'Title',
       'File',
       'Line',
-      'Deprecated In',
+      'Since Version',
       'Removed In',
       'Replacement / Fix',
       'Official Docs',
@@ -45,7 +45,7 @@ export function downloadSheet(report: ScanReport): void {
       issue.title,
       issue.file || '',
       issue.line != null ? String(issue.line) : '',
-      issue.deprecatedIn || '',
+      issue.sinceVersion || issue.deprecatedIn || '',
       issue.removedIn || '',
       issue.replacement || '',
       issue.documentation || '',
@@ -86,40 +86,44 @@ export function buildReportHtml(report: ScanReport): string {
 <title>Hugo Assistant Report</title>
 <style>
   :root {
-    --bg: #0f1419;
-    --panel: #1a222c;
-    --text: #e7eef5;
-    --muted: #8b9aab;
-    --line: #2a3542;
-    --accent: #3d9a7a;
-    --error: #e85d5d;
-    --warning: #e0a045;
-    --info: #4c8fd9;
+    --bg: #fdfbf7;
+    --panel: #ffffff;
+    --text: #111111;
+    --muted: #5c5c5c;
+    --line: #e4ddd0;
+    --accent: #5d7052;
+    --error: #c23b3b;
+    --warning: #b57a1a;
+    --info: #3d6b8f;
+    --sage: #5d7052;
+    --sand: #cdba9e;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: "DM Sans", system-ui, sans-serif;
-    background: radial-gradient(1200px 600px at 10% -10%, #1c2e28 0%, var(--bg) 55%);
+    background: var(--bg);
     color: var(--text);
     padding: 2rem;
-    line-height: 1.5;
+    line-height: 1.55;
   }
   h1 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; font-size: 2.4rem; margin: 0 0 .25rem; }
   h2 { margin: 2rem 0 .75rem; font-size: 1.25rem; }
   .meta { color: var(--muted); margin-bottom: 1.5rem; }
   .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-  .card { background: var(--panel); border: 1px solid var(--line); padding: 1rem 1.25rem; min-width: 120px; }
+  .card { background: #f4efe6; border: 1px solid var(--line); border-radius: 16px; padding: 1rem 1.25rem; min-width: 120px; }
+  .card:nth-child(2) { background: var(--sage); color: #fff; border-color: var(--sage); }
+  .card:nth-child(3) { background: var(--sand); border-color: var(--sand); }
   .card strong { display: block; font-size: 1.6rem; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; font-size: .9rem; overflow: hidden; }
   th, td { padding: .65rem .75rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; background: #f4efe6; }
   code { font-size: .85em; }
   a { color: var(--accent); }
-  .badge { display: inline-block; padding: .15rem .45rem; border-radius: 2px; font-size: .72rem; text-transform: uppercase; font-weight: 700; }
-  .badge.error { background: rgba(232,93,93,.2); color: var(--error); }
-  .badge.warning { background: rgba(224,160,69,.2); color: var(--warning); }
-  .badge.info { background: rgba(76,143,217,.2); color: var(--info); }
+  .badge { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .72rem; text-transform: uppercase; font-weight: 700; }
+  .badge.error { background: rgba(194,59,59,.12); color: var(--error); }
+  .badge.warning { background: rgba(181,122,26,.14); color: var(--warning); }
+  .badge.info { background: rgba(61,107,143,.12); color: var(--info); }
   .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
   .split h3 { margin: 0 0 .5rem; font-size: 1rem; color: var(--muted); }
   @media (max-width: 1100px), print {
@@ -175,7 +179,7 @@ function issueTable(issues: Issue[], showCategory: boolean): string {
     <thead>
       <tr>
         <th>Severity</th>${categoryHeader}<th>Title</th><th>File</th>
-        <th>Deprecated In</th><th>Fix</th><th>Description</th>
+        <th>Since Version</th><th>Fix</th><th>Description</th>
       </tr>
     </thead>
     <tbody>
@@ -196,7 +200,7 @@ function issueRows(issues: Issue[], showCategory: boolean): string {
       ${categoryCell}
       <td>${escapeHtml(i.title)}</td>
       <td><code>${escapeHtml(i.file || '')}${i.line ? ':' + i.line : ''}</code></td>
-      <td>${escapeHtml(i.deprecatedIn || '—')}</td>
+      <td>${escapeHtml(i.sinceVersion || i.deprecatedIn || i.removedIn || '—')}</td>
       <td>${fix}</td>
       <td>${escapeHtml(i.description)}</td>
     </tr>`;

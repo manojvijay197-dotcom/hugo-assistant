@@ -25,8 +25,42 @@ const SKIP_DIRS = new Set([
   '.svn',
   '.hg',
   'dist',
-  'coverage'
+  'coverage',
+  // Generated output — never read or scan
+  'build',
+  'public',
+  'resources',
+  '.cache'
 ]);
+
+const SOURCE_FOLDERS = new Set(['content', 'layouts', 'data', 'i18n', 'assets', 'config']);
+
+/**
+ * Source files only: content, layouts, data, i18n, assets, config/,
+ * plus root config.yaml / hugo.yaml and trago.js.
+ * Anything under build, public, resources, themes, or _vendor is excluded.
+ */
+export function isMigrationSourcePath(rel: string): boolean {
+  const p = toPosix(rel).replace(/^\.\//, '').replace(/^\/+/, '');
+  if (!p || p.endsWith('.DS_Store')) return false;
+  const segs = p.split('/');
+  const blocked = new Set([
+    'build',
+    'public',
+    'resources',
+    '.cache',
+    'node_modules',
+    '.git',
+    'dist',
+    'themes',
+    '_vendor'
+  ]);
+  if (segs.some((s) => blocked.has(s.toLowerCase()))) return false;
+
+  const base = segs[segs.length - 1];
+  if (/^(trago\.js|config\.(ya?ml|yml|toml)|hugo\.(ya?ml|yml|toml))$/i.test(base)) return true;
+  return segs.some((s) => SOURCE_FOLDERS.has(s.toLowerCase()));
+}
 
 function isTragoPath(rel: string): boolean {
   const p = toPosix(rel);
@@ -62,8 +96,7 @@ async function ingestFile(
   rel: string,
   file: File
 ): Promise<void> {
-  if (!rel || rel.endsWith('.DS_Store')) return;
-  if (rel.includes('/.git/') || rel.includes('/node_modules/')) return;
+  if (!isMigrationSourcePath(rel)) return;
 
   let content = '';
   if (shouldReadText(rel, file.size)) {
@@ -111,7 +144,7 @@ async function probeCommonTragoPaths(root: FileSystemDirectoryHandle): Promise<s
  */
 async function findTragoPathByName(
   root: FileSystemDirectoryHandle,
-  onProgress?: (msg: string) => void
+  onProgress?: () => void
 ): Promise<string | null> {
   const queue: Array<{ dir: FileSystemDirectoryHandle; prefix: string }> = [
     { dir: root, prefix: '' }
@@ -123,10 +156,10 @@ async function findTragoPathByName(
     const iterable = dir as DirHandle;
 
     for await (const [name, handle] of iterable.entries()) {
-      if (SKIP_DIRS.has(name)) continue;
+      if (SKIP_DIRS.has(name) || SKIP_DIRS.has(name.toLowerCase())) continue;
       const rel = prefix ? `${prefix}/${name}` : name;
       seen += 1;
-      if (seen % 400 === 0) onProgress?.(`Checking folder type… ${seen} entries`);
+      if (seen % 400 === 0) onProgress?.();
 
       if (handle.kind === 'directory') {
         queue.push({ dir: handle as FileSystemDirectoryHandle, prefix: rel });
@@ -145,9 +178,9 @@ async function findTragoPathByName(
 async function assertKindMatchesDirectory(
   root: FileSystemDirectoryHandle,
   kind: ProjectKind,
-  onProgress?: (msg: string) => void
+  onProgress?: () => void
 ): Promise<void> {
-  onProgress?.('Checking folder type…');
+  onProgress?.();
 
   const quick = await probeCommonTragoPaths(root);
   if (quick) {
@@ -160,17 +193,58 @@ async function assertKindMatchesDirectory(
   // For regular mode we must confirm it isn't elsewhere; for module we still
   // do a cheap name-only scan so nested trago.js can't sneak through.
   if (kind === 'module') {
-    onProgress?.('Confirming no trago.js…');
+    onProgress?.();
     const nested = await findTragoPathByName(root, onProgress);
     const err = modeMismatchError(kind, Boolean(nested));
     if (err) throw err;
     return;
   }
 
-  onProgress?.('Looking for trago.js…');
+  onProgress?.();
   const nested = await findTragoPathByName(root, onProgress);
   const err = modeMismatchError(kind, Boolean(nested));
   if (err) throw err;
+}
+
+export type LoadProgress =
+  | { phase: 'check' }
+  | { phase: 'read'; done: number; total: number };
+
+type CollectedFile = { rel: string; handle: FileSystemFileHandle };
+
+async function collectProjectFiles(
+  root: FileSystemDirectoryHandle,
+  kind: ProjectKind
+): Promise<CollectedFile[]> {
+  const out: CollectedFile[] = [];
+
+  async function walk(dir: FileSystemDirectoryHandle, prefix: string): Promise<void> {
+    const iterable = dir as DirHandle;
+    for await (const [name, handle] of iterable.entries()) {
+      if (SKIP_DIRS.has(name) || SKIP_DIRS.has(name.toLowerCase())) continue;
+      // Regular repo: themes and vendor modules are uploaded separately.
+      if (kind === 'regular' && (name === 'themes' || name === '_vendor')) continue;
+
+      const rel = prefix ? `${prefix}/${name}` : name;
+
+      if (handle.kind === 'directory') {
+        await walk(handle as FileSystemDirectoryHandle, rel);
+        continue;
+      }
+
+      if (handle.kind !== 'file') continue;
+      if (!isMigrationSourcePath(rel)) continue;
+
+      if (kind === 'module' && /^trago\.js$/i.test(name)) {
+        throw modeMismatchError(kind, true)!;
+      }
+
+      out.push({ rel: toPosix(rel), handle: handle as FileSystemFileHandle });
+    }
+  }
+
+  await walk(root, '');
+  return out;
 }
 
 function assertKindMatchesPaths(paths: string[], kind: ProjectKind): void {
@@ -181,22 +255,36 @@ function assertKindMatchesPaths(paths: string[], kind: ProjectKind): void {
 
 export async function loadProjectFromFileList(
   fileList: FileList,
-  kind: ProjectKind
+  kind: ProjectKind,
+  onProgress?: (progress: LoadProgress) => void
 ): Promise<ProjectFiles> {
   const entries = Array.from(fileList);
   const paths = entries.map((file) =>
     toPosix((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name)
   );
 
+  onProgress?.({ phase: 'check' });
   // Fail before reading any file contents
   assertKindMatchesPaths(paths, kind);
 
+  const sourceIndexes = paths
+    .map((p, i) => (isMigrationSourcePath(p) ? i : -1))
+    .filter((i) => i >= 0);
+
   const files = new Map<string, VirtualFile>();
-  await Promise.all(
-    entries.map(async (file, i) => {
-      await ingestFile(files, paths[i], file);
-    })
-  );
+  const total = sourceIndexes.length;
+  let lastPercent = -1;
+
+  for (let n = 0; n < sourceIndexes.length; n++) {
+    const i = sourceIndexes[n];
+    await ingestFile(files, paths[i], entries[i]);
+    const done = n + 1;
+    const percent = total === 0 ? 100 : Math.round((done / total) * 100);
+    if (percent !== lastPercent || done === total) {
+      lastPercent = percent;
+      onProgress?.({ phase: 'read', done, total });
+    }
+  }
 
   return finalizeProject(files, kind);
 }
@@ -204,43 +292,29 @@ export async function loadProjectFromFileList(
 export async function loadProjectFromDirectoryHandle(
   root: FileSystemDirectoryHandle,
   kind: ProjectKind,
-  onProgress?: (scanned: number, current: string) => void
+  onProgress?: (progress: LoadProgress) => void
 ): Promise<ProjectFiles> {
   // Validate mode before reading file contents
-  await assertKindMatchesDirectory(root, kind, (msg) => onProgress?.(0, msg));
+  await assertKindMatchesDirectory(root, kind, () => onProgress?.({ phase: 'check' }));
 
+  const collected = await collectProjectFiles(root, kind);
   const files = new Map<string, VirtualFile>();
-  let scanned = 0;
+  const total = collected.length;
+  let lastPercent = -1;
 
-  async function walk(dir: FileSystemDirectoryHandle, prefix: string): Promise<void> {
-    const iterable = dir as DirHandle;
-    for await (const [name, handle] of iterable.entries()) {
-      if (SKIP_DIRS.has(name)) continue;
-
-      const rel = prefix ? `${prefix}/${name}` : name;
-
-      if (handle.kind === 'directory') {
-        await walk(handle as FileSystemDirectoryHandle, rel);
-        continue;
-      }
-
-      if (handle.kind !== 'file') continue;
-
-      // Safety: if module mode somehow still hits trago.js mid-walk, abort
-      if (kind === 'module' && /^trago\.js$/i.test(name)) {
-        throw modeMismatchError(kind, true)!;
-      }
-
-      const fileHandle = handle as FileSystemFileHandle;
-      const file = await fileHandle.getFile();
-      await ingestFile(files, toPosix(rel), file);
-      scanned += 1;
-      if (scanned % 200 === 0) onProgress?.(scanned, rel);
+  for (let i = 0; i < collected.length; i++) {
+    const { rel, handle } = collected[i];
+    const file = await handle.getFile();
+    await ingestFile(files, rel, file);
+    const done = i + 1;
+    const percent = total === 0 ? 100 : Math.round((done / total) * 100);
+    if (percent !== lastPercent || done === total) {
+      lastPercent = percent;
+      onProgress?.({ phase: 'read', done, total });
     }
   }
 
-  await walk(root, '');
-  onProgress?.(scanned, 'done');
+  if (total === 0) onProgress?.({ phase: 'read', done: 0, total: 0 });
   return finalizeProject(files, kind);
 }
 

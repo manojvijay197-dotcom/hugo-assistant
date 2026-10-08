@@ -1,21 +1,21 @@
 import { normalizeVersion, versionGte } from './DeprecationEngine';
 
-/** Known Hugo releases used to build the target-version radio list (up to current latest). */
+/**
+ * Canonical Hugo target versions (includes patch / sub versions).
+ * Radios are rendered from this list only.
+ */
 export const HUGO_RELEASES: string[] = [
-  '0.55.0',
-  '0.60.0',
-  '0.80.0',
-  '0.100.0',
-  '0.110.0',
-  '0.115.0',
-  '0.120.0',
-  '0.121.0',
-  '0.122.0',
-  '0.123.0',
   '0.124.0',
+  '0.124.1',
   '0.125.0',
+  '0.125.1',
+  '0.125.2',
+  '0.125.3',
+  '0.125.4',
   '0.126.0',
+  '0.126.1',
   '0.127.0',
+  '0.127.1',
   '0.128.0',
   '0.129.0',
   '0.130.0',
@@ -48,48 +48,56 @@ export const HUGO_RELEASES: string[] = [
   '0.157.0',
   '0.158.0',
   '0.159.0',
+  '0.159.1',
+  '0.159.2',
   '0.160.0',
+  '0.160.1',
   '0.161.0',
+  '0.161.1',
   '0.162.0',
+  '0.162.1',
   '0.163.0',
+  '0.163.1',
+  '0.163.2',
+  '0.163.3',
   '0.164.0',
-  '0.165.0'
+  '0.165.0',
+  '0.166.0',
+  '0.167.0'
 ];
 
 export const LATEST_HUGO = HUGO_RELEASES[HUGO_RELEASES.length - 1];
 
 /**
- * Target versions the user can compare against: from the project's current
- * version up through the latest Hugo release (inclusive of current).
+ * Regular Repo: read current from trago.js, then show this array from that
+ * version through the last entry (inclusive).
+ * If current is not an exact list entry, start at the first list version >= current.
  */
 export function getTargetVersionOptions(currentVersion: string): string[] {
   const current = normalizeVersion(currentVersion);
-  const options = HUGO_RELEASES.filter((v) => versionGte(v, current));
+  const exactIndex = HUGO_RELEASES.findIndex((v) => v === current);
 
-  if (!options.includes(current) && coerceOk(current)) {
-    options.unshift(current);
+  if (exactIndex >= 0) {
+    return HUGO_RELEASES.slice(exactIndex);
   }
 
-  // Always ensure latest is present
-  if (!options.includes(LATEST_HUGO) && versionGte(LATEST_HUGO, current)) {
-    options.push(LATEST_HUGO);
+  // Current not in list (e.g. older than 0.124.0, or a missing patch)
+  const startIndex = HUGO_RELEASES.findIndex((v) => versionGte(v, current));
+  if (startIndex >= 0) {
+    return HUGO_RELEASES.slice(startIndex);
   }
 
-  return [...new Set(options)];
+  // Current is newer than every listed release
+  return [LATEST_HUGO];
 }
 
-/** All known Hugo releases — used when scanning Hugo modules (no trago.js / current version). */
+/** Hugo modules (no trago.js): full list as selectable targets. */
 export function getAllTargetVersionOptions(): string[] {
   return [...HUGO_RELEASES];
 }
 
-function coerceOk(v: string): boolean {
-  return /^\d+\.\d+(\.\d+)?$/.test(v.replace(/^v/i, ''));
-}
-
 /**
  * Extract Hugo version from trago.js source text.
- * Supports common patterns used in Traogo / project bootstrap files.
  */
 export function parseHugoVersionFromTrago(source: string): string | null {
   const patterns: RegExp[] = [
@@ -106,7 +114,6 @@ export function parseHugoVersionFromTrago(source: string): string | null {
     if (m?.[1]) return normalizeVersion(m[1]);
   }
 
-  // Fallback: first semver-looking token near "hugo"
   const nearHugo = source.match(/hugo[^0-9]{0,40}(v?\d+\.\d+(?:\.\d+)?)/i);
   if (nearHugo?.[1]) return normalizeVersion(nearHugo[1]);
 

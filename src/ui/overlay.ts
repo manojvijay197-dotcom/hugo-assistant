@@ -59,44 +59,85 @@ function syncBodyLock(): void {
   else document.body.classList.remove('overlay-open');
 }
 
-/** Full-screen loader with descriptive status text. */
-export function showLoader(title: string, detail?: string): void {
+function clampPercent(percent: number | null | undefined): number | null {
+  if (percent == null || Number.isNaN(percent)) return null;
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function progressBarHtml(percent: number | null): string {
+  if (percent == null) return '';
+  return `
+    <div class="loader-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+      <div class="loader-progress-track">
+        <div class="loader-progress-fill" style="width: ${percent}%"></div>
+      </div>
+      <p class="loader-progress-label">${percent}%</p>
+    </div>
+  `;
+}
+
+/** Full-screen loader with optional percent progress bar. */
+export function showLoader(title: string, detail?: string, percent?: number | null): void {
   // Hide popup while loading so only one overlay shows
   const popup = document.getElementById('app-popup');
   if (popup) popup.classList.add('hidden');
 
+  const pct = clampPercent(percent);
   const el = getLoaderEl();
   el.innerHTML = `
     <div class="overlay-card loader-card">
       <div class="spinner" aria-hidden="true"></div>
       <p class="overlay-title">${escapeHtml(title)}</p>
       ${detail ? `<p class="overlay-detail">${escapeHtml(detail)}</p>` : ''}
+      ${progressBarHtml(pct)}
     </div>
   `;
   el.classList.remove('hidden');
   syncBodyLock();
 }
 
-export function updateLoader(title: string, detail?: string): void {
+export function updateLoader(title: string, detail?: string, percent?: number | null): void {
   const el = document.getElementById('app-loader');
   if (!el || el.classList.contains('hidden')) {
-    showLoader(title, detail);
+    showLoader(title, detail, percent);
     return;
   }
+
+  const card = el.querySelector('.loader-card');
   const titleEl = el.querySelector('.overlay-title');
-  const detailEl = el.querySelector('.overlay-detail');
+  let detailEl = el.querySelector('.overlay-detail');
   if (titleEl) titleEl.textContent = title;
+
   if (detail) {
     if (detailEl) detailEl.textContent = detail;
     else {
       const p = document.createElement('p');
       p.className = 'overlay-detail';
       p.textContent = detail;
-      el.querySelector('.loader-card')?.appendChild(p);
+      titleEl?.after(p);
+      detailEl = p;
     }
   } else if (detailEl) {
     detailEl.remove();
   }
+
+  const pct = clampPercent(percent);
+  let progressEl = el.querySelector('.loader-progress');
+  if (pct == null) {
+    progressEl?.remove();
+    return;
+  }
+
+  if (!progressEl) {
+    card?.insertAdjacentHTML('beforeend', progressBarHtml(pct));
+    progressEl = el.querySelector('.loader-progress');
+  }
+
+  progressEl?.setAttribute('aria-valuenow', String(pct));
+  const fill = progressEl?.querySelector('.loader-progress-fill') as HTMLElement | null;
+  const label = progressEl?.querySelector('.loader-progress-label');
+  if (fill) fill.style.width = `${pct}%`;
+  if (label) label.textContent = `${pct}%`;
 }
 
 export function hideLoader(): void {
@@ -189,7 +230,7 @@ export function showConfirm(
 export async function withLoader<T>(
   title: string,
   detail: string | undefined,
-  work: (update: (title: string, detail?: string) => void) => Promise<T>
+  work: (update: (title: string, detail?: string, percent?: number | null) => void) => Promise<T>
 ): Promise<T> {
   showLoader(title, detail);
   try {

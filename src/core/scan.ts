@@ -28,7 +28,7 @@ export function runFullScan(
   currentVersion: string,
   targetVersion: string
 ): ScanReport {
-  const issues = scanDeprecations(project, targetVersion);
+  const issues = scanDeprecations(project, targetVersion, currentVersion);
 
   return {
     generatedAt: new Date().toISOString(),

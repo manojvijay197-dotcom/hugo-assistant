@@ -63,6 +63,18 @@ body {
   color: var(--text);
 }
 
+.hero-logo {
+  line-height: 0;
+}
+
+.hero-logo img {
+  display: block;
+  width: clamp(200px, 32vw, 340px);
+  height: auto;
+  /* Drops the logo's white background onto the cream page */
+  mix-blend-mode: multiply;
+}
+
 .hero p {
   margin: 0;
   color: var(--muted);

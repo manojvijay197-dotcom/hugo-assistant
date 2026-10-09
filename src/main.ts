@@ -53,7 +53,9 @@ function render(): void {
 
   app.innerHTML = `
     <header class="hero">
-      <h1>Hugo Assistant</h1>
+      <h1 class="hero-logo">
+        <img src="/hugo-jump-logo.png" alt="Hugo Jump" width="880" height="190" />
+      </h1>
       <p>Private Hugo migration checker — upload a Regular Repo or a Hugo module separately, pick a target version, then review structure vs other changes.</p>
     </header>
 

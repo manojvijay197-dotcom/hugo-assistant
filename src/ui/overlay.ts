@@ -192,7 +192,7 @@ export function showConfirm(
 
     el.innerHTML = `
       <div class="overlay-card popup-card popup-${kind}" role="dialog" aria-modal="true">
-        <p class="overlay-kicker">Hugo Assistant</p>
+        <p class="overlay-kicker">Hugo Jump</p>
         <p class="overlay-title">${escapeHtml(title)}</p>
         <p class="overlay-detail">${escapeHtml(message)}</p>
         ${
@@ -260,7 +260,7 @@ export function showReportModal(title: string, bodyHtml: string): void {
     <div class="report-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
       <header class="report-modal-header">
         <div>
-          <p class="overlay-kicker">Hugo Assistant</p>
+          <p class="overlay-kicker">Hugo Jump</p>
           <h2 class="report-modal-title">${escapeHtml(title)}</h2>
         </div>
         <button type="button" class="btn-secondary" id="report-modal-close">Close</button>

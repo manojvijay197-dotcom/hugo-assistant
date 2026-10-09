@@ -83,7 +83,7 @@ export function buildReportHtml(report: ScanReport): string {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Hugo Assistant Report</title>
+<title>Hugo Jump Report</title>
 <style>
   :root {
     --bg: #fdfbf7;
@@ -137,7 +137,7 @@ export function buildReportHtml(report: ScanReport): string {
 </style>
 </head>
 <body>
-  <h1>Hugo Assistant</h1>
+  <h1>Hugo Jump</h1>
   <p class="meta">
     Mode: <strong>${escapeHtml(modeLabel)}</strong>
     · ${versionLine}

@@ -55,26 +55,6 @@ export function ruleEventVersions(rule: DeprecationRule): string[] {
   return out;
 }
 
-function contentMatchAllowed(rule: DeprecationRule, filePath: string): boolean {
-  const feature = rule.feature.toLowerCase();
-  const configFile = /\.(ya?ml|yml|toml)$/i.test(filePath);
-  const contentFile = /\.(md|markdown|html?)$/i.test(filePath);
-  if (
-    feature.includes('front matter') ||
-    feature.startsWith('kind ') ||
-    feature.startsWith('lang ') ||
-    feature.startsWith('path ') ||
-    feature.startsWith('cascade') ||
-    feature.includes('template lookup')
-  ) {
-    return contentFile;
-  }
-  if (feature.includes('layout') || feature.includes('partial') || feature.endsWith('.html')) {
-    return /layouts\//i.test(filePath);
-  }
-  return configFile;
-}
-
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
@@ -154,268 +134,262 @@ function matchesStructurePath(rule: DeprecationRule, filePath: string): boolean 
   }
 }
 
-/** Content patterns for structureChange rules that are config/front-matter shaped. */
-function structureContentRegex(rule: DeprecationRule): RegExp | null {
+/**
+ * A rule matches only its exact feature from deprecations.json.
+ * `.Summary` matches `.Summary` / `$page.Summary`. It does not match the word "Summary".
+ * Future rules are picked up from the JSON feature + usageBefore. No per-feature word lists.
+ */
+type ExactMatcher = {
+  /** File must contain every string. */
+  fileAll: string[];
+  /** File must contain at least one string. Empty means no extra file filter. */
+  fileAny: string[];
+  /** Line must contain at least one string before the regex runs. */
+  lineAny: string[];
+  line: RegExp;
+};
+
+function exactMatcherFor(rule: DeprecationRule): ExactMatcher | null {
   const feature = rule.feature.trim();
-  const usage = (rule.usageBefore || '').trim();
+  const usage = rule.usageBefore || '';
+  const sources: string[] = [];
+  const literals: string[] = [];
+  const fileAll: string[] = [];
 
-  switch (feature) {
-    case 'kind front matter':
-      return /^kind\s*:/m;
-    case 'lang front matter':
-      return /^lang\s*:/m;
-    case 'path front matter':
-      return /^path\s*:/m;
-    case 'cascade._target':
-      return /_target\s*:/;
-    case 'paginate':
-      return /\bpaginate\b\s*[:=]/i;
-    case 'paginatePath':
-      return /\bpaginatePath\b\s*[:=]/i;
-    case 'minifyOutput':
-      return /\bminifyOutput\b\s*[:=]/i;
-    case 'services.twitter':
-    case 'twitter service':
-      return /\[services\.twitter\]|services:\s*\n\s*twitter\s*:/i;
-    case 'module.mounts.lang':
-      return /\blang\b\s*[:=]/i;
-    case 'segments.lang':
-      return /\blang\b\s*[:=]/i;
-    case 'module.mounts.includeFiles':
-      return /\bincludeFiles\b\s*[:=]/i;
-    case 'module.mounts.excludeFiles':
-      return /\bexcludeFiles\b\s*[:=]/i;
-    case 'languageCode':
-      return /^\s*languageCode\s*[:=]/m;
-    case 'languages.<lang>.languageCode':
-      return /^\s*languageCode\s*[:=]/m;
-    case 'languages.<lang>.languageName':
-      return /^\s*languageName\s*[:=]/m;
-    case 'languages.<lang>.languageDirection':
-      return /^\s*languageDirection\s*[:=]/m;
-    case 'imaging.compression':
-      return /\bcompression\b\s*[:=]/i;
-    case 'global imaging quality':
-      return /\[imaging\]|imaging:\s*\n[\s\S]*?\bquality\b\s*[:=]/i;
-    case '_internal templates':
-      return /template\s+"_internal\/|partial\s+"_internal\/|_internal\//;
-    case 'relative partial references':
-      return /partial(?:Cached)?\s+["']\.\.?\//;
-    case 'type front matter template lookup':
-      return /^type\s*:/m;
-    case 'layout front matter template lookup':
-      return /^layout\s*:/m;
-    case 'resources.Get symlinked entries':
-      return /resources\.Get\b/;
-    default:
-      break;
+  const add = (source: string, literal: string) => {
+    if (!source || !literal || sources.includes(source)) return;
+    sources.push(source);
+    literals.push(literal);
+  };
+
+  const shortName = shortcodeName(feature);
+  if (shortName) {
+    add(shortcodePattern(shortName), shortName);
+  } else if (feature === 'shortcode Scratch' || /^shortcode\s+Scratch$/i.test(feature)) {
+    add(identPattern('.Scratch'), '.Scratch');
+  } else if (feature.startsWith('--')) {
+    add(`${escapeRe(feature)}\\b`, feature);
+  } else if (feature.startsWith(':')) {
+    add(`${escapeRe(feature)}(?![A-Za-z0-9_])`, feature);
+  } else if (/[<>]/.test(feature)) {
+    const leaf = feature.split('.').pop() || '';
+    if (leaf && !/[<>]/.test(leaf)) add(configAssignPattern(leaf), leaf);
+  } else if (isTemplateFeature(feature, usage)) {
+    for (const needle of templateNeedles(feature, usage)) add(identPattern(needle), needle);
+    if (feature.startsWith('.Site.')) {
+      const alias = 'site.' + feature.slice('.Site.'.length);
+      add(identPattern(alias), alias);
+    } else if (feature.startsWith('Site.')) {
+      add(identPattern('.Site.' + feature.slice('Site.'.length)), '.Site.' + feature.slice('Site.'.length));
+      add(identPattern('site.' + feature.slice('Site.'.length)), 'site.' + feature.slice('Site.'.length));
+    }
+  } else if (isConfigFeature(feature)) {
+    addConfigNeedles(feature, usage, add, fileAll);
+  } else {
+    addPhraseNeedles(feature, usage, add, fileAll);
   }
 
-  if (usage) {
-    // Prefer exact usageBefore snippet when present
-    const escaped = usage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(escaped);
+  if (!sources.length) return null;
+  return {
+    fileAll,
+    fileAny: literals.filter((lit) => lit.length >= 2),
+    lineAny: literals.filter((lit) => lit.length >= 2),
+    line: new RegExp(sources.join('|'))
+  };
+}
+
+function shortcodeName(feature: string): string | null {
+  const m = feature.match(/^(?:shortcode\s+)?([A-Za-z_][\w-]*)\s+shortcodes?$/i);
+  return m ? m[1] : null;
+}
+
+function shortcodePattern(name: string): string {
+  // Opening or closing call only. `twitter` must not match `twitter_simple` or the word in prose.
+  return `\\{\\{[<%]\\s*/?\\s*${escapeRe(name)}(?![\\w-])`;
+}
+
+function identPattern(token: string): string {
+  const body = `${escapeRe(token)}(?![A-Za-z0-9_])`;
+  // A leading dot is the field access itself (`$page.Summary`, `.Summary`).
+  if (token.startsWith('.')) return body;
+  return `(?<![A-Za-z0-9_])${body}`;
+}
+
+function configAssignPattern(key: string): string {
+  // Top-level key only. `paginate` must not match `paginatePath` or `minify.minifyOutput`.
+  return `(?<![A-Za-z0-9_.])${escapeRe(key)}\\s*[:=]`;
+}
+
+function isTemplateFeature(feature: string, usage: string): boolean {
+  if (feature.startsWith('.') || feature.startsWith(':') || feature.startsWith('--')) return true;
+  if (usage.includes('{{')) return true;
+  if (feature.includes('.')) return /^[A-Z]/.test(feature);
+  return false;
+}
+
+function isConfigFeature(feature: string): boolean {
+  if (!feature || /\s/.test(feature) || feature.includes('{{')) return false;
+  if (feature.startsWith('.') || feature.startsWith(':') || feature.startsWith('--')) return false;
+  return /^[A-Za-z_][\w.-]*$/.test(feature);
+}
+
+function pathParts(token: string): string[] {
+  let t = token.trim().replace(/^\$/, '');
+  if (/^[A-Za-z_][\w]*\./.test(t) && !/^[A-Z]/.test(t)) {
+    // $image.Exif → image.Exif → drop the variable and keep the field
+    t = t.replace(/^[A-Za-z_][\w]*/, '');
+  }
+  if (t.startsWith('.')) t = t.slice(1);
+  return t.split('.').filter(Boolean);
+}
+
+/** Dotted tokens written in usageBefore. Quoted sample URLs are ignored. */
+function extractDotted(usage: string): string[] {
+  const bare = usage.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, ' ');
+  const found = new Set<string>();
+  for (const m of bare.matchAll(/\$?[A-Za-z_]*\.[A-Za-z_][\w.]*/g)) {
+    const token = m[0].replace(/\.+$/, '');
+    if (token.includes('.')) found.add(token);
+  }
+  return [...found];
+}
+
+/**
+ * Keep a usage token only when it is the same API as the feature.
+ * `.Page.NextPage` → `.NextPage`. `.Summary` stays `.Summary`, never `Summary`.
+ */
+function templateNeedles(feature: string, usage: string): string[] {
+  const needles = new Set<string>();
+  if (feature.includes('.') || feature.startsWith('.')) {
+    needles.add(feature);
+    if (!feature.startsWith('.')) needles.add('.' + feature);
   }
 
-  return featureRegex(feature);
+  const last = pathParts(feature).pop();
+  if (last) {
+    for (const token of extractDotted(usage)) {
+      // Only template spellings (`.NextPage`, `$image.Exif`). Never a bare word.
+      if (!token.startsWith('.') && !token.startsWith('$')) continue;
+      const parts = pathParts(token);
+      if (!parts.length || parts[parts.length - 1] !== last) continue;
+      const body = token.startsWith('$') ? token.replace(/^\$[A-Za-z_][\w]*/, '') : token;
+      if (!body.startsWith('.')) continue;
+      needles.add(body);
+      // `.Paginator.PageSize` is the feature `PageSize`. Do not reduce
+      // `Page.Language.Lang` to the common field `.Lang`.
+      if (pathParts(feature).length === 1 && body !== '.' + last) needles.add('.' + last);
+    }
+  }
+
+  if (!needles.size && !/[\s/]/.test(feature)) needles.add(feature);
+  return [...needles].sort((a, b) => b.length - a.length);
+}
+
+function addConfigNeedles(
+  feature: string,
+  usage: string,
+  add: (source: string, literal: string) => void,
+  fileAll: string[]
+): void {
+  const brackets = [...usage.matchAll(/\[([A-Za-z0-9_.]+)\]/g)].map((m) => m[1]);
+  if (brackets.length && !feature.includes('.')) {
+    for (const table of brackets) {
+      add(escapeRe('[' + table + ']'), '[' + table);
+      add(identPattern(table), table);
+    }
+    return;
+  }
+
+  if (feature.includes('.')) {
+    add(identPattern(feature), feature);
+    const parts = feature.split('.');
+    const leaf = parts[parts.length - 1];
+    const parent = parts.slice(0, -1).join('.');
+    if (!leaf || leaf.length < 2 || !parent) return;
+    // The leaf key counts only when the parent table is in the same file.
+    fileAll.push(parent);
+    add(configAssignPattern(leaf), leaf);
+    return;
+  }
+
+  if (/[=:]/.test(usage)) {
+    add(configAssignPattern(feature), feature);
+    return;
+  }
+
+  add(identPattern(feature), feature);
+}
+
+function addPhraseNeedles(
+  feature: string,
+  usage: string,
+  add: (source: string, literal: string) => void,
+  fileAll: string[]
+): void {
+  if (usage.includes('_internal/')) add(escapeRe('_internal/'), '_internal/');
+  if (/relative partial/i.test(feature)) {
+    add(`partial(?:Cached)?\\s+["']\\.\\.?/`, 'partial');
+  }
+
+  const api = feature.match(/[a-z][A-Za-z0-9]*\.[A-Za-z_][\w.]*/);
+  if (api && /[A-Z]/.test(api[0])) add(identPattern(api[0]), api[0]);
+
+  const table = usage.match(/\[([A-Za-z0-9_.]+)\]/);
+  const key = usage.match(/(?:^|\n)\s*([A-Za-z_][\w]*)\s*[:=]/);
+  if (table && table[1].includes('.')) {
+    add(escapeRe('[' + table[1] + ']'), '[' + table[1]);
+    add(identPattern(table[1]), table[1]);
+    return;
+  }
+  if (table && key) {
+    fileAll.push('[' + table[1] + ']');
+    add(configAssignPattern(key[1]), key[1]);
+  }
+}
+
+function includesScoped(content: string, bit: string): boolean {
+  if (bit.includes('.')) {
+    if (content.includes(bit) || content.includes('[[' + bit + ']]')) return true;
+    return bit.split('.').every((seg) =>
+      new RegExp(`(?:^|\\n)\\s*${escapeRe(seg)}\\s*:`).test(content)
+    );
+  }
+  return new RegExp(`(?:^|[\\n\\[.\\s])${escapeRe(bit)}(?:$|[\\]\\s:=])`).test(content);
+}
+
+function fileMatches(matcher: ExactMatcher, content: string): boolean {
+  if (matcher.fileAll.length) {
+    const parentOk = matcher.fileAll.every((bit) => includesScoped(content, bit));
+    const dottedLiteral = matcher.fileAny.some((bit) => bit.includes('.') && content.includes(bit));
+    if (!parentOk && !dottedLiteral) return false;
+  }
+  if (!matcher.fileAny.length) return true;
+  return matcher.fileAny.some((bit) => content.includes(bit));
+}
+
+function lineMatches(matcher: ExactMatcher, line: string): { index: number } | null {
+  if (matcher.lineAny.length && !matcher.lineAny.some((bit) => line.includes(bit))) return null;
+  matcher.line.lastIndex = 0;
+  const found = line.match(matcher.line);
+  if (!found || found.index == null) return null;
+  return { index: found.index };
+}
+
+/** Used feature is a migration failure. Introductions keep their own severity. */
+function severityForHit(rule: DeprecationRule): DeprecationRule['severity'] {
+  if (rule.removedIn || rule.deprecatedIn) return 'error';
+  if (rule.severity === 'info') return 'warning';
+  return rule.severity;
 }
 
 function matchesStructureContent(rule: DeprecationRule, content: string): boolean {
-  const re = structureContentRegex(rule);
-  if (!re) return false;
-  return re.test(content);
+  const matcher = matcherFor(rule);
+  if (!matcher || !fileMatches(matcher, content)) return false;
+  return content.split(/\r?\n/).some((line) => lineMatches(matcher, line));
 }
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Build a content regex for a single API / config token. */
-function featureRegex(feature: string): RegExp | null {
-  const f = feature.trim();
-  if (!f) return null;
-
-  // Never treat full example templates as the primary matcher.
-  // Callers should pass extracted tokens, not "{{ .Scratch.Set ... }}".
-  if (f.includes('{{') || f.includes('}}')) return null;
-
-  // Phrases that are not literal code tokens
-  if (/\bfront matter\b/i.test(f) || /\btemplate lookup\b/i.test(f)) {
-    const key = f
-      .replace(/\s*front matter.*$/i, '')
-      .replace(/\s*template lookup.*$/i, '')
-      .trim();
-    if (key) return new RegExp(`^\\s*${escapeRe(key)}\\s*:`, 'm');
-    return null;
-  }
-
-  if (/\bshortcode\b/i.test(f) && !f.includes('.')) {
-    const name = f.replace(/\bshortcodes?\b/gi, '').trim();
-    if (!name || /\s/.test(name)) return null;
-    if (/^scratch$/i.test(name)) {
-      return /(?<![A-Za-z0-9_])\.Scratch(?![A-Za-z0-9_])/;
-    }
-    // Shortcode call only. Never the bare word (that flagged "user" / prose).
-    return new RegExp(`\\{\\{[<%]\\s*${escapeRe(name)}\\b`);
-  }
-
-  // CLI flags
-  if (f.startsWith('--')) {
-    return new RegExp(`${escapeRe(f)}\\b`);
-  }
-
-  // Permalink tokens like :filename
-  if (f.startsWith(':')) {
-    return new RegExp(`${escapeRe(f)}\\b`);
-  }
-
-  // Nested config keys with placeholders: languages.<lang>.languageCode
-  if (f.includes('.<') || f.includes('>.')) {
-    const leaf = f.split('.').pop() || f;
-    return new RegExp(`\\b${escapeRe(leaf)}\\b\\s*[:=]`, 'i');
-  }
-
-  // Dot-path / dotted identifiers: .Site.Author, resources.PostProcess, Page.IsNode
-  if (f.startsWith('.') || f.includes('.')) {
-    return dottedPathRegex(f);
-  }
-
-  // Plain identifiers (getJSON, LibSass). Case-sensitive — "Get it on Google Play" is not getJSON.
-  return new RegExp(`(?<![A-Za-z0-9_])${escapeRe(f)}(?![A-Za-z0-9_])`);
-}
-
-/**
- * Match dotted Hugo APIs in real code:
- *   .Site.Data  ↔  site.Data
- *   .Page.Sites ↔  .Sites (when feature is .Page.Sites)
- *   Page.Language.Lang ↔ .Language.Lang / .Page.Language.Lang
- */
-function dottedPathRegex(feature: string): RegExp {
-  const f = feature.trim();
-  const variants = new Set<string>([f]);
-
-  if (f.startsWith('.Site.')) {
-    variants.add('site.' + f.slice('.Site.'.length));
-    variants.add(f.slice(1)); // Site.X
-  } else if (f.startsWith('site.')) {
-    variants.add('.Site.' + f.slice('site.'.length));
-  } else if (f.startsWith('.Page.')) {
-    variants.add(f.slice('.Page.'.length)); // .Sites from .Page.Sites? careful
-    variants.add(f.slice(1)); // Page.X
-    // Also allow bare .X only for unambiguous Page methods (IsNode, Sites)
-    const leaf = f.slice('.Page.'.length);
-    if (/^(Sites|IsNode|NextPage|PrevPage)$/i.test(leaf)) {
-      variants.add('.' + leaf);
-    }
-  } else if (f.startsWith('Page.')) {
-    variants.add('.' + f);
-    variants.add('.' + f.slice('Page.'.length));
-  } else if (f.startsWith('Site.')) {
-    variants.add('.' + f);
-    variants.add('site.' + f.slice('Site.'.length));
-  } else if (f.startsWith('Language.')) {
-    variants.add('.' + f);
-    variants.add('.Language.' + f.slice('Language.'.length));
-    variants.add('.Page.Language.' + f.slice('Language.'.length));
-    variants.add('.Site.Language.' + f.slice('Language.'.length));
-  } else if (!f.startsWith('.')) {
-    variants.add('.' + f);
-  }
-
-  const body = [...variants]
-    .map((v) => escapeRe(v))
-    .sort((a, b) => b.length - a.length)
-    .join('|');
-  return new RegExp(`(?<![A-Za-z0-9_])(?:${body})(?![A-Za-z0-9_])`);
-}
-
-const TEMPLATE_NOISE = new Set([
-  'if', 'else', 'end', 'with', 'range', 'and', 'or', 'not', 'true', 'false',
-  'dict', 'index', 'len', 'printf', 'print', 'eq', 'ne', 'lt', 'gt', 'ge', 'le',
-  'isset', 'default', 'partial', 'partialcached', 'block', 'define', 'template',
-  'where', 'first', 'last', 'after', 'delimit', 'slice', 'append', 'merge'
-]);
-
-/** Feature text that is itself a code symbol, not a sentence. */
-function isStrictCodeToken(feature: string): boolean {
-  const f = feature.trim();
-  if (!f || /\s/.test(f) || f.includes('{{') || f.includes('/')) return false;
-  if (f.startsWith('--') || f.startsWith(':') || f.startsWith('.')) return true;
-  if (f.includes('.')) return true;
-  return /[A-Z]/.test(f) && /^[A-Za-z_][\w]*$/.test(f);
-}
-
-/**
- * Needles come only from the rule feature and usageBefore in deprecations.json.
- * Sample URLs and shortcode attributes (https:, user=, id=) are never needles.
- */
-function contentPatternsForRule(rule: DeprecationRule): RegExp[] {
-  const usage = rule.usageBefore || '';
-  const feature = rule.feature.trim();
-  const patterns: RegExp[] = [];
-  const seen = new Set<string>();
-  const add = (re: RegExp | null) => {
-    if (!re || seen.has(re.source)) return;
-    seen.add(re.source);
-    patterns.push(re);
-  };
-
-  const shortcodeNames = new Set<string>();
-  for (const m of usage.matchAll(/\{\{[<%]\s*([A-Za-z_][\w-]*)/g)) {
-    shortcodeNames.add(m[1]);
-  }
-  const phrase = feature.match(/^(?:shortcode\s+)?([A-Za-z_][\w-]*)\s+shortcodes?$/i);
-  if (phrase) shortcodeNames.add(phrase[1]);
-
-  // Shortcode rules match only `{{< name` / `{{% name`, never the word in prose.
-  if (shortcodeNames.size) {
-    for (const name of shortcodeNames) {
-      if (/^scratch$/i.test(name)) {
-        add(/(?<![A-Za-z0-9_])\.Scratch(?![A-Za-z0-9_])/);
-      } else {
-        add(new RegExp(`\\{\\{[<%]\\s*${escapeRe(name)}\\b`));
-      }
-    }
-    return patterns;
-  }
-
-  if (isStrictCodeToken(feature)) add(featureRegex(feature));
-  if (/scratch/i.test(feature)) add(/(?<![A-Za-z0-9_])\.Scratch(?![A-Za-z0-9_])/);
-
-  // Identifiers inside {{ }} only. Quoted strings are removed so sample URLs cannot match.
-  // Dotted paths stay whole: never split .Site.Author into the word "Site".
-  const withoutQuotes = usage.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, ' ');
-  for (const block of withoutQuotes.matchAll(/\{\{[<%]?\s*([\s\S]*?)\}\}/g)) {
-    const inner = block[1];
-    for (const m of inner.matchAll(/\.?[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+/g)) {
-      add(featureRegex(m[0]));
-    }
-    const rest = inner.replace(/\.?[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+/g, ' ');
-    for (const m of rest.matchAll(/\b([A-Za-z_][\w]*)\b/g)) {
-      const name = m[1];
-      if (TEMPLATE_NOISE.has(name.toLowerCase())) continue;
-      if (!/[A-Z]/.test(name)) continue;
-      add(featureRegex(name));
-    }
-  }
-
-  if (!usage.includes('{{')) {
-    for (const m of usage.matchAll(/\[[A-Za-z0-9_.]+\]/g)) {
-      add(new RegExp(escapeRe(m[0])));
-      const inner = m[0].slice(1, -1);
-      if (inner.includes('.')) add(featureRegex(inner));
-    }
-    for (const m of usage.matchAll(/(?:^|\n)\s*([A-Za-z_][\w.]*)\s*[=:]/gm)) {
-      const key = m[1];
-      if (key.length < 4 || /^(https?|true|false|null)$/i.test(key)) continue;
-      add(new RegExp(`(?<![A-Za-z0-9_])${escapeRe(key)}\\s*[=:]`));
-    }
-    for (const m of usage.matchAll(/:([A-Za-z]+)/g)) {
-      add(new RegExp(`:${escapeRe(m[1])}\\b`));
-    }
-  }
-
-  return patterns;
 }
 
 function annotateRule(rule: DeprecationRule, targetVersion: string): DeprecationRule {
@@ -434,20 +408,23 @@ function annotateRule(rule: DeprecationRule, targetVersion: string): Deprecation
   };
 }
 
+const matcherCache = new Map<string, ExactMatcher | null>();
+
+function matcherFor(rule: DeprecationRule): ExactMatcher | null {
+  const key = `${rule.id}\0${rule.feature}\0${rule.usageBefore || ''}`;
+  const cached = matcherCache.get(key);
+  if (cached !== undefined) return cached;
+  const built = exactMatcherFor(rule);
+  matcherCache.set(key, built);
+  return built;
+}
+
 function findMatchLine(content: string, rule: DeprecationRule): number | undefined {
-  const patterns = [structureContentRegex(rule), ...contentPatternsForRule(rule)].filter(
-    (re): re is RegExp => Boolean(re)
-  );
-  if (!patterns.length) return undefined;
+  const matcher = matcherFor(rule);
+  if (!matcher) return undefined;
   const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    for (const re of patterns) {
-      if (re.test(lines[i])) {
-        re.lastIndex = 0;
-        return i + 1;
-      }
-      re.lastIndex = 0;
-    }
+    if (lineMatches(matcher, lines[i])) return i + 1;
   }
   return undefined;
 }
@@ -474,69 +451,37 @@ export class DeprecationEngine {
     scope: Issue['scope']
   ): Issue[] {
     const issues: Issue[] = [];
-    const lines = content.split(/\r?\n/);
     const commonRules = activeRules.filter((r) => !r.structureChange && !r.advisory);
-    const seen = new Set<string>();
-    const markdown = /\.(md|markdown|org)$/i.test(filePath);
-    const configLike = /\.(ya?ml|yml|toml|json)$/i.test(filePath) || /trago\.js$/i.test(filePath);
-    const codeFile = /\.(html?|xml|js|ts|css|scss|sass|svg)$/i.test(filePath);
-    const lineOk: boolean[] = [];
-    let inFrontMatter = false;
-    let frontMatterClosed = false;
-    for (let i = 0; i < lines.length; i++) {
-      const lineContent = lines[i];
-      if (markdown) {
-        if (!frontMatterClosed && lineContent.trim() === '---') {
-          inFrontMatter = !inFrontMatter;
-          if (!inFrontMatter) frontMatterClosed = true;
-          lineOk.push(false);
-          continue;
-        }
-        lineOk.push(inFrontMatter || lineContent.includes('{{'));
-      } else if (configLike || codeFile) {
-        lineOk.push(true);
-      } else {
-        lineOk.push(lineContent.includes('{{') || lineContent.includes('='));
-      }
-    }
-
+    const prepared: Array<{ rule: DeprecationRule; matcher: ExactMatcher }> = [];
     for (const rule of commonRules) {
-      // Skip rules that only apply inside shortcode templates when the file isn't one
       if (/^shortcode\s+Scratch$/i.test(rule.feature.trim())) {
         if (!/(^|\/)layouts\/(?:_?shortcodes)\//i.test(filePath)) continue;
       }
+      const matcher = matcherFor(rule);
+      if (!matcher || !fileMatches(matcher, content)) continue;
+      prepared.push({ rule, matcher });
+    }
+    if (!prepared.length) return issues;
 
-      const patterns = contentPatternsForRule(rule);
-      if (!patterns.length) continue;
-
-      for (let i = 0; i < lines.length; i++) {
-        if (!lineOk[i]) continue;
-        const lineContent = lines[i];
-        let matched = false;
-        let idx = 0;
-        for (const regex of patterns) {
-          const m = lineContent.match(regex);
-          regex.lastIndex = 0;
-          if (!m || m.index == null) continue;
-          matched = true;
-          idx = m.index;
-          break;
-        }
-        if (!matched) continue;
-
+    const lines = content.split(/\r?\n/);
+    const seen = new Set<string>();
+    for (let i = 0; i < lines.length; i++) {
+      const lineContent = lines[i];
+      for (const { rule, matcher } of prepared) {
+        const hit = lineMatches(matcher, lineContent);
+        if (!hit) continue;
         const key = `${rule.id}::${filePath}::${i + 1}`;
         if (seen.has(key)) continue;
         seen.add(key);
-
         issues.push({
           id: `${rule.id}-deprecation`,
           title: `Deprecated Feature: ${rule.feature}`,
           description: rule.description,
-          severity: rule.severity,
+          severity: severityForHit(rule),
           category: 'deprecation',
           file: filePath,
           line: i + 1,
-          column: idx + 1,
+          column: hit.index + 1,
           replacement: rule.replacement,
           documentation: rule.documentation,
           deprecatedIn: rule.deprecatedIn || undefined,
@@ -562,10 +507,7 @@ export class DeprecationEngine {
 
     for (const rule of structureRules) {
       const pathHit = matchesStructurePath(rule, filePath);
-      const contentHit =
-        !pathHit && content && contentMatchAllowed(rule, filePath)
-          ? matchesStructureContent(rule, content)
-          : false;
+      const contentHit = !pathHit && content ? matchesStructureContent(rule, content) : false;
       if (!pathHit && !contentHit) continue;
 
       const line =
@@ -575,7 +517,7 @@ export class DeprecationEngine {
         id: `${rule.id}-structure`,
         title: `Structure Change: ${rule.feature}`,
         description: rule.description,
-        severity: rule.severity === 'info' ? 'warning' : rule.severity,
+        severity: severityForHit(rule),
         category: 'structure',
         file: filePath,
         line,

@@ -155,6 +155,47 @@ if (!realGetJson.some((i) => /getJSON/.test(i.title))) {
   console.error('Expected getJSON hit on {{ getJSON ... }}');
   process.exit(1);
 }
+
+const summaryWord = engine.scanContent(
+  'content/us/payroll/pricing-comparison/index.md',
+  '---\ntitle: Payroll Journal Summary\nsummary: A plain summary of pricing\n---\n\nThis summary is not a template call.\n',
+  active,
+  'website'
+);
+const realSummary = engine.scanContent(
+  'layouts/partials/card.html',
+  '<p>{{ .Summary }}</p>\n<p>{{ $page.Summary }}</p>\n',
+  active,
+  'website'
+);
+const summarySeverity = realSummary.filter((i) => /\.Summary/.test(i.title));
+console.log('word Summary hits:', summaryWord.map((i) => i.title));
+console.log('exact .Summary hits:', summarySeverity.map((i) => `${i.severity} ${i.title} @ ${i.line}`));
+if (summaryWord.some((i) => /\.Summary|Summary/.test(i.title))) {
+  console.error('The word Summary must not be reported as .Summary');
+  process.exit(1);
+}
+if (summarySeverity.length !== 2) {
+  console.error('Expected .Summary and $page.Summary only');
+  process.exit(1);
+}
+
+const bareLang = engine.scanContent(
+  'layouts/partials/header.html',
+  '{{ .Lang }}',
+  active,
+  'website'
+);
+if (bareLang.some((i) => /Language\.Lang/.test(i.title))) {
+  console.error('.Lang must not be reported as Page.Language.Lang');
+  process.exit(1);
+}
+
+const scratchSeverity = scratchHits.every((i) => i.severity === 'error');
+if (!scratchSeverity) {
+  console.error('.Scratch is deprecated and must be reported as an error');
+  process.exit(1);
+}
 const pagesLine = engine.scanContent(
   'layouts/partials/header.html',
   '{{ range .Site.Pages }}',

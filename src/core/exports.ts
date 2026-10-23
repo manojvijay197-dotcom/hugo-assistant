@@ -14,7 +14,7 @@ export function downloadJson(report: ScanReport): void {
   downloadBlob('report.json', blob);
 }
 
-export function downloadSheet(report: ScanReport): void {
+export function buildReportCsv(report: ScanReport): string {
   const rows: string[][] = [
     [
       'Scope',
@@ -56,7 +56,7 @@ export function downloadSheet(report: ScanReport): void {
   for (const issue of report.results.structureIssues) push(issue);
   for (const issue of report.results.commonIssues) push(issue);
 
-  const csv = rows
+  return rows
     .map((r) =>
       r
         .map((cell) => {
@@ -67,8 +67,10 @@ export function downloadSheet(report: ScanReport): void {
         .join(',')
     )
     .join('\n');
+}
 
-  downloadBlob('report.csv', new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+export function downloadSheet(report: ScanReport): void {
+  downloadBlob('report.csv', new Blob([buildReportCsv(report)], { type: 'text/csv;charset=utf-8' }));
 }
 
 export function buildReportHtml(report: ScanReport): string {

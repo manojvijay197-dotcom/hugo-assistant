@@ -1,6 +1,11 @@
 # Hugo Assistant
 
-Browser-only Hugo migration checker. Clone and run on any device.
+Hugo migration checker. Installed from the internal registry and run on the current project (Trago gulp task or `hugo-assistant`). It does not ask for a folder.
+
+- **Regular repo** — `trago.js` or `website/trago.js` is in the project. Current Hugo version is read from that file. You pick the target version.
+- **Hugo module** — no `trago.js`. You pick the target version only.
+
+Browser upload (choose a mode, then a folder) is still available with `npm run dev` for local use.
 
 Choose one mode per upload:
 
@@ -14,7 +19,7 @@ Scans for:
 - **Hugo code deprecations** (with fix + official docs link)
 - **Hugo structure changes** (e.g. `layouts/partials` → `layouts/_partials`)
 
-No CLI. No image / SEO / accessibility / performance / link audits.
+No image / SEO / accessibility / performance / link audits.
 
 **Repo:** https://github.com/manojvijay197-dotcom/hugo-assistant
 
@@ -98,8 +103,25 @@ Use **Save .hugo-assistant reports** in the UI, or download PDF / Sheet / JSON f
 
 ---
 
+## Run inside a project (Trago)
+
+The command scans the project it is started in. Copy `examples/trago-task.js` to `trago/tasks/hugoAssistant.js`, depend on this package, then run:
+
+```bash
+trago hugoAssistant
+```
+
+Or from the project directory, without a gulp task:
+
+```bash
+hugo-assistant
+hugo-assistant --target 0.146.0
+```
+
+Reports are written to `.hugo-assistant/report.html`, `report.json`, and `report.csv`.
+
 ## Notes
 
-- Analysis runs **entirely in the browser** on the folder you select (`"private": true` — not published as an npm package).
-- Prefer **Chrome/Edge** so folder access uses the File System Access API (avoids Chrome’s “Upload N files to this site?” dialog from the old file-input method).
+- The published package runs in Node on the current project. The browser UI remains for local folder uploads.
+- Prefer **Chrome/Edge** for the browser UI so folder access uses the File System Access API.
 - Node.js **18+** required.

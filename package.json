@@ -1,12 +1,31 @@
 {
   "name": "hugo-assistant",
-  "version": "2.0.0",
-  "private": true,
-  "description": "Private browser-based Hugo migration assistant — deprecations and structure changes",
+  "version": "2.1.0",
+  "description": "Hugo migration checker for the current project — deprecations and structure changes",
   "type": "module",
+  "main": "./lib/index.cjs",
+  "types": "./types/hugo-assistant.d.ts",
+  "bin": {
+    "hugo-assistant": "./lib/cli.cjs"
+  },
+  "files": [
+    "lib",
+    "types/hugo-assistant.d.ts",
+    "examples/trago-task.js",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./types/hugo-assistant.d.ts",
+      "require": "./lib/index.cjs",
+      "default": "./lib/index.cjs"
+    }
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build:lib": "node scripts/build-lib.mjs",
+    "build": "tsc && vite build && npm run build:lib",
+    "prepublishOnly": "npm run build:lib",
     "preview": "vite preview",
     "start": "vite",
     "smoke": "npx --yes tsx scripts/smoke-scan.ts"
@@ -15,6 +34,8 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.3.3",
     "vite": "^5.4.0"
   }

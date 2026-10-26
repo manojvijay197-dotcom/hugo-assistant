@@ -1,6 +1,6 @@
 {
   "name": "hugo-assistant",
-  "version": "2.1.0",
+  "version": "1.2.0",
   "description": "Hugo migration checker for the current project — deprecations and structure changes",
   "type": "module",
   "main": "./lib/index.cjs",
